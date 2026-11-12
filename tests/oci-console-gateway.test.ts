@@ -41,7 +41,7 @@ async function system(t: TestContext, root: string | null = "root-console-gatewa
     environments: { get: () => environment },
   }, experimental_callHostRpc: async ({ hostId: target, method, input }) => {
     assert.equal(target, hostId); calls.push({ method, input, hostId: target }); await state.before(method, input);
-    if (method === "inspectLoginCapabilities") return assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: true, cliSourceMatched: true });
+    if (method === "inspectLoginCapabilities") return assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: true, cliSourceMatched: true });
     if (method === "controlInfo") return { provisioned: state.root !== null, rootId: state.root, provisioningDirectory: "/private/console-gateway-root" };
     if (method === "authenticateControl") { assert.equal((input as { key: string }).key, key); return { ok: true, grant: { capability: state.capability, expiresAt: Date.now() + 300_000 } }; }
     if (method === "authorizeControl") return state.authorized && (input as { capability: string }).capability === state.capability ? { ok: true } : { ok: false, reason: "authorization" };
@@ -94,6 +94,19 @@ async function system(t: TestContext, root: string | null = "root-console-gatewa
 }
 
 // Registered SDK/host fixtures prove the boundary contract, never actual phone/Oracle authentication.
+test("a configured host choice survives private reauthentication before start and cannot retarget to remote", async t => {
+  const s = await system(t); await s.authenticate(); s.state.phoneControlAccepted = true;
+  assert.equal((await s.post("console-target", { expected, controlMode: "host" })).status, 200);
+  assert.equal((await s.attempt()).controlMode, "host");
+  const reopened = await s.authenticate();
+  assert.equal((await reopened.json() as any).attempt.controlMode, "host");
+  assert.equal((await s.post("console-target", { expected, controlMode: "remote" })).status, 409);
+  assert.equal((await s.post("start", { controlMode: "remote" })).status, 409);
+  assert.equal((await s.attempt()).phase, "awaiting_control");
+  assert.equal((await s.post("start")).status, 202);
+  assert.equal((s.calls.find(call => call.method === "startConsole")!.input as any).controlMode, "host");
+});
+
 test("Console queues bounded metadata while owner, paired-control and private expected-domain gates block startup", async t => {
   const s = await system(t, null);
   assert.deepEqual(Object.keys(s.requested).sort(), ["attemptId", "expiresAt", "hostId", "mode", "phase", "resume"]);

@@ -6,7 +6,7 @@ type Runtime = { platform: string; architecture: string; chromeVersion: string |
 export function assessLoginCapabilities(runtime: Runtime): LoginCapabilities {
   const common: LoginCapabilityReason[] = [];
   if (runtime.platform !== "darwin" || runtime.architecture !== "arm64") common.push("platform_unsupported");
-  if (runtime.chromeVersion !== "157.0.8103.50") common.push("browser_pin_unmatched");
+  if (runtime.chromeVersion !== "157.0.8103.51") common.push("browser_pin_unmatched");
   if (!runtime.processInspection) common.push("process_inspection_unavailable");
   const cli = [...common]; if (!runtime.cliSourceMatched) cli.push("cli_source_unmatched");
   const candidate = (id: "oci_cli" | "oci_web", reasons: LoginCapabilityReason[]) => ({ id, method: "host_browser" as const,

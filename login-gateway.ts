@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { browserControlModeSchema } from "./browser-control.ts";
 import { hostContract } from "./host-contract.ts";
 import { fixtureInputSchema, frameRefSchema, inputIdSchema } from "./fixture-wire.ts";
 import { attemptIdentity, type LoginCoordinator } from "./login-coordinator.ts";
@@ -11,10 +12,11 @@ import { cliExpectedIdentitySchema } from "./oci-cli-protocol.ts";
 import { consoleExpectedIdentitySchema } from "./oci-console-protocol.ts";
 
 const selection = z.object({ attemptId: z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/) }).strict();
+const presentation = selection.extend({ controlMode: browserControlModeSchema.optional() }).strict();
 const session = selection.extend({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict();
 const input = selection.extend({ event: fixtureInputSchema, inputId: inputIdSchema, frameRef: frameRefSchema }).strict();
-const ociTarget = selection.extend({ expected: cliExpectedIdentitySchema }).strict();
-const consoleTarget = selection.extend({ expected: consoleExpectedIdentitySchema }).strict();
+const ociTarget = presentation.extend({ expected: cliExpectedIdentitySchema }).strict();
+const consoleTarget = presentation.extend({ expected: consoleExpectedIdentitySchema }).strict();
 class Refusal extends Error {
   constructor(readonly status: 403 | 409 | 503) { super("Login control unavailable."); }
 }
@@ -78,7 +80,7 @@ export function registerLoginGateway(bb: BbPluginApi, coordinator: LoginCoordina
       let value: unknown;
       try { value = await controlPayload(context.req.raw); }
       catch { return context.json({ error: "invalid_request" }, 400); }
-      const parsed = (action === "session" ? session : action === "input" ? input : action === "oci-target" ? ociTarget : action === "console-target" ? consoleTarget : selection).safeParse(value);
+      const parsed = (action === "session" ? session : action === "input" ? input : action === "oci-target" ? ociTarget : action === "console-target" ? consoleTarget : action === "start" || action === "oci-status" || action === "console-status" ? presentation : selection).safeParse(value);
       if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
       const id = parsed.data.attemptId;
       const capability = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(context.req.header("authorization") ?? "")?.[1];
@@ -109,24 +111,31 @@ export function registerLoginGateway(bb: BbPluginApi, coordinator: LoginCoordina
         await inspect(a, signal);
         const options = { hostId: a.hostId, signal };
         const proof = { capability: capability!, scope: scopeOf(a) };
+        const selected = (action === "start" || action === "oci-status" || action === "console-status" || action === "oci-target" || action === "console-target")
+          ? presentation.parse({ attemptId: id, ...("controlMode" in parsed.data ? { controlMode: parsed.data.controlMode } : {}) }) : null;
+        if (a.controlMode !== undefined && selected?.controlMode && selected.controlMode !== a.controlMode) throw new Refusal(409);
+        const controlMode = a.controlMode ?? selected?.controlMode;
+        const presentationProof = { ...proof, ...(controlMode ? { controlMode } : {}) };
         const authorization = await bounded(host.call("authorizeControl", proof, options), signal);
         if (!authorization.ok) throw new Refusal(403);
         await inspect(a, signal);
         if (action === "oci-target") {
           if (a.mode !== "oci_cli") throw new Refusal(409);
-          const configured = await bounded(host.call("configureOci", { ...proof, expected: ociTarget.parse(value).expected }, options), signal);
+          if (a.controlMode === undefined) a = transition(a, { type: "select_control", controlMode: controlMode ?? "remote" });
+          const configured = await bounded(host.call("configureOci", { ...presentationProof, expected: ociTarget.parse(value).expected }, options), signal);
           if (!configured.ok) throw new Refusal(403);
           await inspect(a, signal); return context.json({ configured: true });
         }
         if (action === "console-target") {
           if (a.mode !== "oci_web") throw new Refusal(409);
-          const configured = await bounded(host.call("configureConsole", { ...proof, expected: consoleTarget.parse(value).expected }, options), signal);
+          if (a.controlMode === undefined) a = transition(a, { type: "select_control", controlMode: controlMode ?? "remote" });
+          const configured = await bounded(host.call("configureConsole", { ...presentationProof, expected: consoleTarget.parse(value).expected }, options), signal);
           if (!configured.ok) throw new Refusal(403);
           await inspect(a, signal); return context.json({ configured: true });
         }
         if (action === "oci-status" || action === "console-status") {
           if (a.mode !== (action === "oci-status" ? "oci_cli" : "oci_web")) throw new Refusal(409);
-          const current = await bounded(host.call(a.mode === "oci_web" ? "consoleStatus" : "ociStatus", proof, options), signal);
+          const current = await bounded(host.call(a.mode === "oci_web" ? "consoleStatus" : "ociStatus", presentationProof, options), signal);
           if (!current.ok) throw new Refusal(403);
           await inspect(a, signal);
           if (a.phase === "starting" && current.status.phase === "user_control") a = transition(a, { type: "ready" });
@@ -151,12 +160,12 @@ export function registerLoginGateway(bb: BbPluginApi, coordinator: LoginCoordina
         }
         if (action === "start") {
           if (a.mode !== "synthetic") {
-            const available = await bounded(host.call(a.mode === "oci_web" ? "consoleStatus" : "ociStatus", proof, options), signal);
+            const available = await bounded(host.call(a.mode === "oci_web" ? "consoleStatus" : "ociStatus", presentationProof, options), signal);
             if (!available.ok || !available.status.configured || !available.status.phoneControlAccepted) throw new Refusal(403);
             await inspect(a, signal);
           }
-          a = transition(a, { type: "start" }); mutated = a;
-          const opened = await bounded(host.call(a.mode === "oci_web" ? "startConsole" : a.mode === "oci_cli" ? "startOci" : "startFixture", proof, options), signal);
+          a = transition(a, { type: "start", ...(controlMode ? { controlMode } : {}) }); mutated = a;
+          const opened = await bounded(host.call(a.mode === "oci_web" ? "startConsole" : a.mode === "oci_cli" ? "startOci" : "startFixture", presentationProof, options), signal);
           if (!opened.ok) throw new Refusal(503);
           await inspect(a, signal);
           if (a.mode !== "synthetic") { mutated = undefined; return context.json({ pending: true }, 202); }
@@ -225,6 +234,7 @@ export function registerLoginGateway(bb: BbPluginApi, coordinator: LoginCoordina
           coordinator.acknowledgeCleanup(a.attemptId);
           return context.json({ closed: true });
         }
+        if (a.controlMode === "host") throw new Refusal(409);
         const result = action === "frame" ? await bounded(host.call(a.mode === "oci_web" ? "frameConsole" : a.mode === "oci_cli" ? "frameOci" : "frameFixture", proof, options), signal)
           : await bounded(host.call(a.mode === "oci_web" ? "inputConsole" : a.mode === "oci_cli" ? "inputOci" : "inputFixture", { ...proof, event: input.parse(value).event, inputId: input.parse(value).inputId, frameRef: input.parse(value).frameRef }, options), signal);
         if (!result.ok) {

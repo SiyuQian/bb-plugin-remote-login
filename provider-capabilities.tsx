@@ -75,8 +75,8 @@ export function ProviderCapabilitiesPage() {
         }} />
         <Button type="submit" className="w-full sm:w-auto" disabled={pending || !selectedHost || selectedHost.length > 200}>{pending ? "检查中…" : "检查登录方式"}</Button>
       </form>
-      <p className="text-sm text-muted-foreground">当前固定验证环境：macOS arm64、Chrome 157.0.8103.50、Puppeteer 25.16.0、Sydney（ap-sydney-1）/ oc1。</p>
-      <p className="text-sm text-muted-foreground">开始前还需完成手机配对，并确认预期账号。环境检查不代表已登录。</p>
+      <p className="text-sm text-muted-foreground">当前固定验证环境：macOS arm64、Chrome 157.0.8103.51、Puppeteer 25.16.0、Sydney（ap-sydney-1）/ oc1。</p>
+      <p className="text-sm text-muted-foreground">开始前还需完成控制配对，并确认预期账号。环境检查不代表已登录。</p>
       {pending ? <p role="status" aria-live="polite" className="text-sm">正在检查所选 host…</p> : null}
       {current?.status === "error" ? <p role="alert" className="text-sm text-destructive">{failureMessage}</p> : null}
       {current?.status === "ready" ? <section className="space-y-3" aria-label="所选 host 报告">

@@ -72,7 +72,7 @@ for (const boundary of ["rpc", "http"] as const) {
       await page.select("select", hostA);
       await tapButton(page, "检查连接与配对状态");
       await waitText(page, "host 尚未配对");
-      await tapButton(page, "生成手机控制密钥");
+      await tapButton(page, "生成控制密钥");
       await page.waitForSelector('input[type="password"][readonly]');
       proof = await page.evaluateHandle(async () => {
         const input = document.querySelector<HTMLInputElement>('input[type="password"][readonly]');

@@ -42,7 +42,7 @@ async function fixture(t: TestContext) {
     assert.equal(mode, constants.X_OK);
   });
   t.mock.method(cp, "execFile", (_file: string, _args: string[], _options: ExecFileOptionsWithStringEncoding, callback: MetadataCallback) => {
-    callback(null, "157.0.8103.50\n", "");
+    callback(null, "157.0.8103.51\n", "");
     return {} as ChildProcess;
   });
   t.mock.method(runtime.runtimeCapabilityDependencies, "inspectOwnedProcess", async (pid: number) => {
@@ -63,11 +63,11 @@ test("preflight reads fixed Chrome metadata and reports only runtime capability 
     assert.equal(options?.killSignal, "SIGKILL");
     assert.ok(options?.signal instanceof AbortSignal);
     assert.deepEqual(options?.env, { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" });
-    callback(null, "157.0.8103.50\n", "");
+    callback(null, "157.0.8103.51\n", "");
     return {} as ChildProcess;
   });
   assert.deepEqual(await runtime.inspectLoginRuntimeCapabilities(new AbortController().signal), {
-    platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: true, cliSourceMatched: true,
+    platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: true, cliSourceMatched: true,
   });
 });
 
@@ -95,9 +95,9 @@ test("a different valid Chrome version remains observable for the caller's pin g
 test("Chrome errors and malformed metadata cannot leak child diagnostics", async (t) => {
   const runtime = await fixture(t);
   for (const [error, output, stderr] of [
-    [new Error("sensitive-child-error"), "157.0.8103.50", ""],
-    [null, "157.0.8103.50", "sensitive-stderr"],
-    [null, "157.0.8103.50\nsensitive-output", ""],
+    [new Error("sensitive-child-error"), "157.0.8103.51", ""],
+    [null, "157.0.8103.51", "sensitive-stderr"],
+    [null, "157.0.8103.51\nsensitive-output", ""],
     [null, "", ""],
   ] as const) {
     t.mock.method(cp, "execFile", (_file: string, _args: string[], _options: ExecFileOptionsWithStringEncoding, callback: MetadataCallback) => {
@@ -119,7 +119,7 @@ test("process inspection requires a strict schema and the exact current PID and 
     t.mock.method(runtime.runtimeCapabilityDependencies, "inspectOwnedProcess", async () => result);
     const capabilities = await runtime.inspectLoginRuntimeCapabilities(new AbortController().signal);
     assert.equal(capabilities.processInspection, false);
-    assert.equal(capabilities.chromeVersion, "157.0.8103.50");
+    assert.equal(capabilities.chromeVersion, "157.0.8103.51");
     assert.equal(capabilities.cliSourceMatched, true);
   }
 });
@@ -128,7 +128,7 @@ test("missing pinned Python or libproc returns unavailable without blocking othe
   const runtime = await fixture(t);
   t.mock.method(runtime.runtimeCapabilityDependencies, "inspectOwnedProcess", async () => { throw new Error("private-process-diagnostic"); });
   assert.deepEqual(await runtime.inspectLoginRuntimeCapabilities(new AbortController().signal), {
-    platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: false, cliSourceMatched: true,
+    platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: false, cliSourceMatched: true,
   });
 });
 
@@ -140,7 +140,7 @@ test("source mismatch, source read failure and malformed source reports fail ind
     const result = await runtime.inspectLoginRuntimeCapabilities(new AbortController().signal);
     assert.equal(result.cliSourceMatched, false);
     assert.equal(result.processInspection, true);
-    assert.equal(result.chromeVersion, "157.0.8103.50");
+    assert.equal(result.chromeVersion, "157.0.8103.51");
   }
   t.mock.method(runtime.runtimeCapabilityDependencies, "inspectInstalledOciCompatibility", async () => { throw new Error("private-source-diagnostic"); });
   assert.equal((await runtime.inspectLoginRuntimeCapabilities(new AbortController().signal)).cliSourceMatched, false);
@@ -224,7 +224,7 @@ test("one shared deadline bounds ignored probe waits below six seconds and prese
   try { assert.equal(completed, true, "preflight must settle before the six-second outer RPC budget"); }
   finally { controller.abort(); }
   assert.deepEqual(await result, {
-    platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: false, cliSourceMatched: false,
+    platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: false, cliSourceMatched: false,
   });
 });
 

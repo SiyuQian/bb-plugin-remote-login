@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { experimental_useServers, type PluginPendingInteractionProps } from "@get-bb/plugin-sdk/app";
 import { z } from "zod";
+import type { BrowserControlMode } from "./browser-control.ts";
 import type { ControlGrant } from "./control-authority.ts";
 import type { AttemptPhase, LoginAttempt } from "./login-protocol.ts";
 import { postLogin, type OciLoginStatus } from "./login-client.ts";
@@ -15,14 +16,14 @@ const phases: Record<AttemptPhase, string> = {
   awaiting_pairing: "等待配对", awaiting_control: "等待控制", checking_existing: "检查已有会话", starting: "启动中", user_control: "用户控制中",
   verifying: "核验中", verified: "已核验", cancelled: "已取消", expired: "已过期", failed: "未完成", unsupported: "暂不支持",
 };
-type Session = { attemptId: string; origin: string; live: boolean; controller: AbortController | null; verified: boolean; completing: boolean; authorizing: boolean; cancelling: boolean; proof: ControlGrant | null; binding: LoginAttempt | null; hardDeadline: number; controlling: boolean; ociReady: boolean; started: boolean };
+type Session = { controlMode: BrowserControlMode; attemptId: string; origin: string; live: boolean; controller: AbortController | null; verified: boolean; completing: boolean; authorizing: boolean; cancelling: boolean; proof: ControlGrant | null; binding: LoginAttempt | null; hardDeadline: number; controlling: boolean; ociReady: boolean; started: boolean };
 type View = {
-  session: Session; attempt: LoginAttempt | null; grant: ControlGrant | null; key: string; pending: boolean;
+  controlMode: BrowserControlMode; session: Session; attempt: LoginAttempt | null; grant: ControlGrant | null; key: string; pending: boolean;
   expired: boolean; message: string; phase: AttemptPhase | null; completion: "none" | "pending" | "error" | "done";
   stopped: boolean | null; cancellation: "none" | "pending" | "error" | "done";
   oci: OciLoginStatus | null; tenancyOcid: string; userOcid: string; region: string; domainOcid: string; domainOrigin: string;
 };
-const initial = (session: Session): View => ({ session, attempt: null, grant: null, key: "", pending: false, expired: false, message: "", phase: null, completion: "none", stopped: null, cancellation: "none", oci: null, tenancyOcid: "", userOcid: "", region: "", domainOcid: "", domainOrigin: "" });
+const initial = (session: Session): View => ({ controlMode: "remote", session, attempt: null, grant: null, key: "", pending: false, expired: false, message: "", phase: null, completion: "none", stopped: null, cancellation: "none", oci: null, tenancyOcid: "", userOcid: "", region: "", domainOcid: "", domainOrigin: "" });
 export const canControlLogin = (attempt: LoginAttempt): boolean => attempt.expiresAt > Date.now()
   && (["awaiting_pairing", "awaiting_control"].includes(attempt.phase) || (attempt.mode === "oci_web" && attempt.phase === "verifying"));
 
@@ -32,7 +33,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
   const origin = servers === null ? (typeof window === "undefined" ? "" : window.location.origin)
     : servers.servers.find((server) => server.active)?.origin ?? "";
   const [refresh, setRefresh] = useState(0);
-  const session = useMemo<Session>(() => ({ attemptId, origin, live: true, controller: null, verified: false, completing: false, authorizing: false, cancelling: false, proof: null, binding: null, hardDeadline: 0, controlling: false, ociReady: false, started: false }), [attemptId, origin, refresh]);
+  const session = useMemo<Session>(() => ({ controlMode: "remote", attemptId, origin, live: true, controller: null, verified: false, completing: false, authorizing: false, cancelling: false, proof: null, binding: null, hardDeadline: 0, controlling: false, ociReady: false, started: false }), [attemptId, origin, refresh]);
   const completion = useRef(onComplete); completion.current = onComplete;
   const cancellation = useRef(onCancel); cancellation.current = onCancel;
   const [view, setView] = useState(() => initial(session));
@@ -52,7 +53,8 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
     void postLogin(origin, "status", { attemptId }, undefined, controller.signal).then((attempt) => {
       if (attempt.attemptId !== attemptId) throw new Error();
       session.verified = attempt.phase === "verified" && attempt.resume.state === "pending" && attempt.expiresAt > Date.now();
-      update((current) => ({ ...current, attempt, phase: attempt.phase }));
+      session.controlMode = attempt.controlMode ?? "remote";
+      update((current) => ({ ...current, attempt, phase: attempt.phase, controlMode: session.controlMode }));
     }).catch(() => update((current) => ({ ...current, message: "暂时无法读取登录请求，请重新打开。" })))
       .finally(() => { clearTimeout(timeout); update((current) => ({ ...current, pending: false })); });
     return () => { session.live = false; controller.abort(); session.controller?.abort(); clearTimeout(timeout); };
@@ -77,9 +79,10 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
     try {
       const value = await postLogin(origin, "session", { attemptId, key: suppliedKey }, undefined, controller.signal);
       if (value.attempt.attemptId !== attemptId || !canControlLogin(value.attempt)
-        || (["hostId", "threadId", "environmentId", "browserContextId", "generation", "mode"] as const).some((field) => value.attempt[field] !== shown.attempt![field])) throw new Error();
+        || (["hostId", "threadId", "environmentId", "browserContextId", "generation", "mode", "controlMode"] as const).some((field) => value.attempt[field] !== shown.attempt![field])) throw new Error();
       if (!session.live || controller.signal.aborted || value.grant.expiresAt <= Date.now()
         || value.grant.expiresAt > value.attempt.expiresAt || value.grant.expiresAt > Date.now() + 300_000) throw new Error();
+      if (value.attempt.controlMode && value.attempt.controlMode !== session.controlMode) throw new Error();
       session.proof = value.grant; session.binding = value.attempt; session.controlling = true;
       session.hardDeadline = Math.min(value.grant.expiresAt + 600_000, value.attempt.expiresAt);
       update((current) => ({ ...current, attempt: value.attempt, phase: value.attempt.phase, grant: value.grant, message: "已验证控制密钥。每次授权最长五分钟，可手动续期，累计最长十五分钟。" }));
@@ -87,8 +90,9 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
     } catch { update((current) => ({ ...current, message: oci ? "OCI 控制鉴权未通过。请确认主机控制根已配置，并检查密钥和请求状态。" : "测试控制鉴权未通过，请确认密钥和请求状态后重试。" })); }
     finally { clearTimeout(timeout); session.authorizing = false; update((current) => ({ ...current, pending: false })); }
   };
+  const presentation = () => session.controlMode === "host" ? { controlMode: "host" as const } : {};
   const readOciStatus = async (capability: string, signal: AbortSignal) => {
-    const status = await postLogin(origin, session.binding?.mode === "oci_web" ? "console-status" : "oci-status", { attemptId }, capability, signal);
+    const status = await postLogin(origin, session.binding?.mode === "oci_web" ? "console-status" : "oci-status", { attemptId, ...presentation() }, capability, signal);
     if (!session.live || !session.controlling || signal.aborted) throw new Error();
     session.ociReady = status.configured && status.phoneControlAccepted && status.phase === "ready" && status.failure === null;
     update((current) => ({ ...current, oci: status }));
@@ -105,7 +109,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
     const controller = new AbortController(); session.controller = controller;
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      await postLogin(origin, consoleLogin ? "console-target" : "oci-target", { attemptId, expected: selected }, capability, controller.signal);
+      await postLogin(origin, consoleLogin ? "console-target" : "oci-target", { attemptId, ...presentation(), expected: selected }, capability, controller.signal);
       await readOciStatus(capability, controller.signal);
       update((current) => ({ ...current, message: `已私下绑定 ${provider} 目标；账号标识不会写入等待卡片。` }));
     } catch { update((current) => ({ ...current, message: `${provider} 目标尚未确认，请检查私有控制状态后重试。` })); }
@@ -157,7 +161,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
         if (session.binding?.mode !== "synthetic" && !session.ociReady) throw new Error();
         session.started = true;
         update((current) => ({ ...current, phase: "starting" }));
-        const result = await postLogin(origin, "start", { attemptId }, proof(), signal);
+        const result = await postLogin(origin, "start", { attemptId, ...presentation() }, proof(), signal);
         if ("pending" in result) {
           if (session.binding?.mode === "synthetic") throw new Error();
         } else update((current) => ({ ...current, phase: "user_control" }));
@@ -165,7 +169,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
       },
       readyStatus: async (signal) => {
         if (!session.binding || session.binding.mode === "synthetic") throw new Error();
-        const status = await postLogin(origin, session.binding.mode === "oci_web" ? "console-status" : "oci-status", { attemptId }, proof(), signal);
+        const status = await postLogin(origin, session.binding.mode === "oci_web" ? "console-status" : "oci-status", { attemptId, ...presentation() }, proof(), signal);
         if (!status.configured || !status.phoneControlAccepted || status.failure !== null) throw new Error();
         if (status.phase === "starting") return false;
         if (status.phase !== "user_control") throw new Error();
@@ -237,7 +241,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
   };
   const usable = shown.attempt && canControlLogin(shown.attempt) && !shown.expired && !session.verified && shown.stopped === null && shown.cancellation === "none";
   return <section className="space-y-3" aria-label={oci ? "OCI 登录控制" : "登录测试控制"}>
-    <p className="text-sm">{consoleLogin ? "OCI Console 登录：需要已配置的主机控制根、私有目标和手机控制验收。账号登录只在私有浏览器中进行；交还后由主机在同一浏览器上下文核验身份。" : oci ? "OCI CLI 登录：需要已配置的主机控制根、私有目标和手机控制验收。账号登录只在私有浏览器中进行；交还后由主机独立核验 CLI 身份与资源。" : "合成登录控制原型：仅操作固定假页面，请勿输入真实账号凭据。每次授权最长五分钟，可手动续期，累计最长十五分钟。"}</p>
+    <p className="text-sm">{consoleLogin ? "OCI Console 登录：需要已配置的主机控制根、私有目标和当前控制方式验收。账号登录只在私有浏览器中进行；交还后由主机在同一浏览器上下文核验身份。" : oci ? "OCI CLI 登录：需要已配置的主机控制根、私有目标和当前控制方式验收。账号登录只在私有浏览器中进行；交还后由主机独立核验 CLI 身份与资源。" : "合成登录控制原型：仅操作固定假页面，请勿输入真实账号凭据。每次授权最长五分钟，可手动续期，累计最长十五分钟。"}</p>
     <Button type="button" variant="outline" disabled={shown.pending || grant !== null || shown.completion === "pending" || shown.cancellation === "pending"}
       onClick={() => { if (!session.authorizing && !grant) setRefresh((value) => value + 1); }}>{oci ? "刷新 OCI 请求状态" : "刷新测试状态"}</Button>
     {shown.attempt ? <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm" aria-label="绑定的登录请求">
@@ -251,6 +255,21 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
     {shown.pending && !shown.attempt ? <p role="status">读取登录请求中…</p> : null}
     {shown.attempt && !usable && !session.verified ? <p>此请求当前不能接管，请查看登录请求状态。</p> : null}
     {usable ? <div className="space-y-2">
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium">登录操作方式</legend>
+        {([ ["remote", "远程接管"], ["host", "在 host 上直接登录"] ] as const).map(([value, label]) => <label key={value} className="flex items-center gap-2 text-sm">
+          <input type="radio" name={`control-mode-${attemptId}`} value={value} checked={shown.controlMode === value}
+            disabled={shown.pending || grant !== null || session.started || shown.attempt?.controlMode !== undefined || shown.attempt?.phase === "verifying"}
+            onChange={() => {
+              if (shown.pending || session.authorizing || session.controlling || session.started || shown.attempt?.controlMode !== undefined || shown.attempt?.phase === "verifying") return;
+              session.controlMode = value;
+              update((current) => ({ ...current, controlMode: value }));
+            }} />{label}
+        </label>)}
+        <p className="text-sm text-muted-foreground">{shown.controlMode === "host"
+          ? `窗口会在目标 host（${shown.attempt?.hostId}）打开，需要能操作该 host 的图形桌面。验证控制密钥后将固定本次方式。`
+          : "通过本页的私有浏览器画面远程操作目标 host。验证控制密钥后将固定本次方式。"}</p>
+      </fieldset>
       <label className="block space-y-1 text-sm">控制密钥<Input type="password" autoComplete="off" value={shown.key} disabled={shown.pending || grant !== null}
         onChange={(event) => update((current) => ({ ...current, key: event.target.value }))} /></label>
       <Button type="button" disabled={shown.pending || grant !== null || !shown.key} onClick={() => void authenticate()}>{oci ? "验证 OCI 控制密钥" : "验证并接管测试"}</Button>
@@ -267,7 +286,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
         <label className="block space-y-1 text-sm">目标 Region<Input autoComplete="off" value={consoleLogin ? "ap-sydney-1" : shown.region} readOnly={consoleLogin} disabled={shown.pending} onChange={(event) => update((current) => ({ ...current, region: event.target.value }))} /></label>
         <Button type="button" disabled={shown.pending || !expected.success || !shown.oci?.phoneControlAccepted || shown.oci.failure !== null} onClick={() => void configureOci()}>确认私有 {provider} 目标</Button>
       </> : <p>已绑定私有 {provider} 目标。</p>}
-      {!shown.oci?.phoneControlAccepted ? <p>手机控制验收尚未通过。请先完成配对控制通道的合成测试，再检查 OCI 启动条件。</p> : null}
+      {!shown.oci?.phoneControlAccepted ? <p>当前控制方式验收尚未通过。请先完成配对控制通道的合成测试，再检查 OCI 启动条件。</p> : null}
       {shown.oci?.failure ? <p>OCI 主机条件未就绪，请查看请求状态。</p> : null}
       <Button type="button" variant="outline" disabled={shown.pending || session.started} onClick={() => void refreshOci()}>检查 OCI 启动条件</Button>
       {!shown.oci?.configured ? <Button type="button" variant="outline" disabled={shown.pending} onClick={() => void stopUnstartedOci()}>停止 {provider} 登录</Button> : null}
@@ -276,7 +295,7 @@ export function LoginControls({ attemptId, onComplete, onCancel }: { attemptId: 
       ? "点击“交还并授权只读”并通过主机核验后，原任务可在同一浏览器上下文执行 read_identity 和 read_page，只读取当前页面的标题与标题层级。主机会保留该浏览器；不授权表单、输入、Cookie 或截图访问。交还会暂停浏览器输入。"
       : "点击“交还并授权只读”并通过主机核验后，原任务可只读列出此账号的 compartments 和悉尼（ap-sydney-1）区域实例。交还会暂停浏览器输入。"}</p> : null}
     {grant && shown.attempt && transport && (!oci || shown.oci?.configured) ? <FixtureControls origin={origin} hostId={shown.attempt.hostId} scope={shown.attempt} capability={grant.capability}
-      mode={consoleLogin ? "oci_web" : oci ? "oci_cli" : "synthetic"} startDisabled={oci && (!session.ociReady || shown.pending)}
+      controlMode={shown.controlMode} mode={consoleLogin ? "oci_web" : oci ? "oci_cli" : "synthetic"} startDisabled={oci && (!session.ociReady || shown.pending)}
       initialVerifying={consoleLogin && shown.oci?.phase === "verifying"}
       handbackLabel={oci ? "交还并授权只读" : undefined}
       transport={transport} onRenewed={acceptRenewal} onVerified={() => { session.verified = true; update((current) => ({ ...current, grant: null, key: "" })); void finish(); }}

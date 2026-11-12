@@ -4,12 +4,14 @@ The registered plugin now connects `oci_cli` requests, private phone controls, t
 
 ## Supported target and gates
 
-The current runtime is restricted to macOS arm64, Google Chrome `157.0.8103.50`, Puppeteer `25.16.0`, OCI CLI `3.88.0` with Python `3.14.6`, OCI Python SDK `2.180.0`, region `ap-sydney-1` and realm `oc1`. A browser update or incompatible reviewed source fails closed. Source fingerprints do not pin the complete dependency graph.
+The controller offers explicit host-window or remote control; both require a matching control-path receipt. See [host login](host-login.md).
+
+The current runtime is restricted to macOS arm64, Google Chrome `157.0.8103.51`, Puppeteer `25.16.0`, OCI CLI `3.88.0` with Python `3.14.6`, OCI Python SDK `2.180.0`, region `ap-sydney-1` and realm `oc1`. A browser update or incompatible reviewed source fails closed. Source fingerprints do not pin the complete dependency graph.
 
 A native `remote_login_request({mode:"oci_cli",wait:true})` can queue only when the selected host's fixed source inventory reports `matched`. The inventory's `hostBrowser.enabled:false` and `phoneCallback.enabled:false` are static, unvalidated inventory facts; they are not runtime authorization switches. Actual startup separately requires:
 
 1. An owner-provisioned control root and a live capability bound to the stored host/attempt/scope.
-2. A private paired-control acceptance receipt, produced only after the host verifies its owned synthetic fixture and confirms that exact browser's closure. The receipt lasts 24 hours and matches the current control-root generation and exact `private-fixture/Chrome-157.0.8103.50/v1` pin. It is checked from safe private host storage; a public success flag, ordinary `/control/check` history or UI checkbox cannot create it. This proves the paired control path, not a physical iPhone or human identity.
+2. A private paired-control acceptance receipt, produced only after the host verifies its owned synthetic fixture and confirms that exact browser's closure. The receipt lasts 24 hours and matches the current control-root generation and exact `private-fixture/Chrome-157.0.8103.51/v1` pin. It is checked from safe private host storage; a public success flag, ordinary `/control/check` history or UI checkbox cannot create it. This proves the paired control path, not a physical iPhone or human identity.
 3. An independently selected expected user OCID, tenancy OCID, region and realm. The controller sends these only through bearer-protected `/login/oci-target`, before startup, and clears the raw inputs immediately. The host keeps the target immutable for that scope. It never derives expected identity from the resulting config, token or browser display name.
 
 The public interaction contains only `{attemptId}`. Native tools cannot select an account, host, URL, executable, profile, script or verifier.

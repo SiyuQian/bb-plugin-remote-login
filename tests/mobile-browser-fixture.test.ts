@@ -9,7 +9,7 @@ test("the public app harness renders and remounts real registrations with built 
     rpc(method) { calls.push(method); if (method === "hostChoices") return [{ id: "mobile-smoke-host", name: "Mobile smoke host" }]; if (method === "loginAttempts") return []; assert.fail("Unexpected fixture RPC"); },
   });
   await s.page.waitForSelector('option[value="mobile-smoke-host"]');
-  assert.equal(await s.page.$eval("h1", node => node.textContent), "手机配对");
+  assert.equal(await s.page.$eval("h1", node => node.textContent), "控制配对");
   const metrics = await s.metrics();
   assert.equal(metrics.viewport.width, 390); assert.equal(metrics.viewport.height, 844); assert.equal(metrics.pointerCoarse, true);
   assert.equal(metrics.main.paddingTop, "16px"); assert.equal(metrics.page.scrollWidth, 390); assert.equal(metrics.errors, 0);
@@ -54,9 +54,9 @@ test("the observed host base contract keeps the actual pairing input inside the 
   });
   await s.page.waitForSelector('option[value="mobile-input-host"]');
   await s.page.click("button:not([hidden])");
-  await s.page.waitForSelector("input");
+  await s.page.waitForSelector('input[type="password"]');
   const measure = () => s.page.evaluate(() => {
-    const input = document.querySelector("input")!, style = getComputedStyle(input), box = input.getBoundingClientRect();
+    const input = document.querySelector('input[type="password"]')!, style = getComputedStyle(input), box = input.getBoundingClientRect();
     return { viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth, input: { width: box.width, left: box.left, right: box.right,
       parentWidth: input.parentElement!.getBoundingClientRect().width, boxSizing: style.boxSizing, paddingLeft: style.paddingLeft,
       paddingRight: style.paddingRight, borderLeft: style.borderLeftWidth, borderRight: style.borderRightWidth, fontSize: style.fontSize } };
@@ -67,7 +67,7 @@ test("the observed host base contract keeps the actual pairing input inside the 
   assert.ok(geometry.input.width <= geometry.input.parentWidth); assert.ok(geometry.input.right <= 390);
   assert.equal(geometry.input.paddingLeft, "12px"); assert.equal(geometry.input.fontSize, "15px");
   await s.show("login-control", { id: "mobile-layout-interaction", payload: { attemptId: "mobile-layout-attempt" }, submit() { assert.fail("Layout cannot complete authentication"); }, cancel() { assert.fail("Layout cannot cancel an original call"); } });
-  await s.page.waitForSelector("input");
+  await s.page.waitForSelector('input[type="password"]');
   const controller = await measure();
   assert.equal(controller.viewport, 390); assert.equal(controller.scrollWidth, 390);
   assert.equal(controller.input.boxSizing, "border-box"); assert.equal(controller.input.width, 358);

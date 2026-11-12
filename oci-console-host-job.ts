@@ -1,3 +1,4 @@
+import { browserControlModeSchema, type BrowserControlMode } from "./browser-control.ts";
 import { randomUUID } from "node:crypto";
 import type { ControlGrant, ControlScope } from "./control-authority.ts";
 import { controlScopeSchema } from "./control-wire.ts";
@@ -19,14 +20,14 @@ type ErrorCode = Failure | "busy" | "inactive" | "aborted" | "invalid_target" | 
 type Options = {
   dataDir: string; lifecycle: AbortSignal;
   authorize(capability: string, scope: ControlScope): Promise<number>;
-  requirePhoneGate(): Promise<void>;
+  requirePhoneGate(controlMode: BrowserControlMode): Promise<void>;
   now?: () => number;
   dependencies?: { openBrowser?: typeof openOciConsoleBrowser };
 };
 type Handback = OciHostStatus & { verified: boolean; receipt?: string; browserRef?: string };
 type Slot = { done: Promise<void>; release(): void };
 type Run = {
-  key: string; scope: ControlScope; expected: ConsoleExpectedIdentity; capability: string;
+  key: string; scope: ControlScope; controlMode: BrowserControlMode; expected: ConsoleExpectedIdentity; capability: string;
   expiresAt: number; hardDeadline: number; controller: AbortController; retained: Retention;
   opening: Promise<ConsoleBrowser>; browser?: ConsoleBrowser; launchAttempted: boolean;
   phase: OciHostStatus["phase"]; failure: OciHostStatus["failure"]; stopped: boolean;
@@ -60,7 +61,7 @@ async function race<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
 export class ConsoleHostJobs {
   #options: Options;
   #openBrowser: typeof openOciConsoleBrowser;
-  #configured = new Map<string, ConsoleExpectedIdentity>();
+  #configured = new Map<string, { expected: ConsoleExpectedIdentity; controlMode: BrowserControlMode }>();
   #runs = new Map<string, Run>();
   #closedScopes = new Set<string>();
   #active?: Run;
@@ -81,14 +82,14 @@ export class ConsoleHostJobs {
     if (this.#disposed || this.#options.lifecycle.aborted) fail("unavailable");
     if (this.#poisoned) fail("cleanup_uncertain"); if (signal?.aborted) fail("aborted");
   }
-  async #phone(signal: AbortSignal): Promise<void> {
-    try { await race(Promise.resolve().then(this.#options.requirePhoneGate), AbortSignal.any([signal, this.#options.lifecycle, AbortSignal.timeout(8000)])); }
+  async #phone(signal: AbortSignal, controlMode: BrowserControlMode): Promise<void> {
+    try { await race(Promise.resolve().then(() => this.#options.requirePhoneGate(controlMode)), AbortSignal.any([signal, this.#options.lifecycle, AbortSignal.timeout(8000)])); }
     catch { fail("unsupported"); } this.#available(signal);
   }
-  async #authorize(capability: string, scope: ControlScope, signal: AbortSignal, phone = true): Promise<number> {
+  async #authorize(capability: string, scope: ControlScope, signal: AbortSignal, phone = true, controlMode = this.#configured.get(keyOf(scope))?.controlMode ?? "remote"): Promise<number> {
     this.#available(signal);
     const stopped = AbortSignal.any([signal, this.#options.lifecycle, AbortSignal.timeout(8000)]);
-    if (phone) await this.#phone(stopped);
+    if (phone) await this.#phone(stopped, controlMode);
     let expiry: number;
     try { expiry = await race(Promise.resolve().then(() => this.#options.authorize(capability, scope)), stopped); }
     catch { fail("authorization"); }
@@ -133,40 +134,49 @@ export class ConsoleHostJobs {
       phase: run?.phase ?? (this.#closedScopes.has(key) ? "cancelled" : this.#configured.has(key) ? "ready" : "unconfigured"),
       failure: run?.failure ?? (this.#closedScopes.has(key) ? "cancelled" : null) };
   }
-  async configure(capability: string, supplied: ControlScope, expected: ConsoleExpectedIdentity, signal: AbortSignal): Promise<void> {
-    const scope = scopeValue(supplied), key = keyOf(scope); await this.#authorize(capability, scope, signal);
+  async configure(capability: string, supplied: ControlScope, expected: ConsoleExpectedIdentity, signal: AbortSignal, suppliedMode: BrowserControlMode = "remote"): Promise<void> {
+    const scope = scopeValue(supplied), key = keyOf(scope), mode = browserControlModeSchema.safeParse(suppliedMode);
+    if (!mode.success) fail("invalid_target");
+    const controlMode = mode.data;
+    await this.#authorize(capability, scope, signal, true, controlMode);
     if (this.#closedScopes.has(key)) fail("inactive");
     const parsed = consoleExpectedIdentitySchema.safeParse(expected);
     if (!parsed.success || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(scope.attemptId)) fail("invalid_target");
     const prior = this.#configured.get(key);
-    if (prior) { if (JSON.stringify(prior) !== JSON.stringify(parsed.data)) fail("invalid_target"); return; }
-    if (this.#configured.size >= 256) fail("busy"); this.#configured.set(key, Object.freeze(parsed.data));
+    if (prior) { if (prior.controlMode !== controlMode || JSON.stringify(prior.expected) !== JSON.stringify(parsed.data)) fail("invalid_target"); return; }
+    if (this.#configured.size >= 256) fail("busy"); this.#configured.set(key, Object.freeze({ expected: Object.freeze(parsed.data), controlMode }));
   }
-  async start(capability: string, supplied: ControlScope, signal: AbortSignal, retain: () => Retention): Promise<typeof viewport> {
+  async start(capability: string, supplied: ControlScope, signal: AbortSignal, retain: () => Retention, suppliedMode: BrowserControlMode = "remote"): Promise<typeof viewport> {
     const scope = scopeValue(supplied), key = keyOf(scope), prior = this.#runs.get(key), revision = prior?.proofRevision;
-    const expiry = await this.#authorize(capability, scope, signal), expected = this.#configured.get(key);
-    if (!expected) fail("invalid_target"); if (this.#closedScopes.has(key)) fail("inactive");
+    const mode = browserControlModeSchema.safeParse(suppliedMode);
+    if (!mode.success) fail("invalid_target");
+    const controlMode = mode.data;
+    const expiry = await this.#authorize(capability, scope, signal, true, controlMode), configured = this.#configured.get(key);
+    if (!configured || configured.controlMode !== controlMode) fail("invalid_target");
+    const expected = configured.expected; if (this.#closedScopes.has(key)) fail("inactive");
     if (prior) { this.#refresh(prior, capability, expiry, revision); if (!["starting", "user_control"].includes(prior.phase)) fail("inactive"); return { ...viewport }; }
     if (this.#active || [...this.#runs.values()].some(run => run.cleanup && !run.retainedReleased)) fail("busy");
     let retained: Retention;
     try { retained = retain(); } catch { fail("unavailable"); }
     try { this.#available(signal); } catch (error) { try { await retained.dispose(); } catch { this.#poisoned = true; fail("cleanup_uncertain"); } throw error; }
-    const run: Run = { key, scope, expected, capability, expiresAt: expiry, hardDeadline: this.#time() + 900000,
+    const run: Run = { key, scope, controlMode, expected, capability, expiresAt: expiry, hardDeadline: this.#time() + 900000,
       retained, controller: new AbortController(), opening: Promise.resolve(undefined as never), launchAttempted: false,
       phase: "starting", failure: null, stopped: false, proofRevision: 0, retainedReleased: false, inputIds: new InputReplayGuard() };
     this.#runs.set(key, run); this.#active = run; this.#schedule(run);
     run.opening = Promise.resolve().then(async () => {
       await this.#authorizeRun(run); run.launchAttempted = true;
-      const browser = await this.#openBrowser({ tempDir: this.#options.dataDir, expected: run.expected, scope: run.scope,
+      const browser = await this.#openBrowser({ tempDir: this.#options.dataDir, controlMode: run.controlMode, expected: run.expected, scope: run.scope,
         expiresAt: run.hardDeadline, lifecycle: run.controller.signal,
         assertOwned: async (bound, stopped) => { if (keyOf(scopeValue(bound)) !== run.key) fail("authorization"); await this.#authorizeRun(run, stopped); } });
       run.browser = browser; this.#live(run); await this.#authorizeRun(run); this.#live(run); run.phase = "user_control"; return browser;
     });
     void run.opening.catch((error) => { void this.#stop(run, failureOf(error)).catch(() => {}); }); return { ...viewport };
   }
-  async status(capability: string, supplied: ControlScope, signal: AbortSignal): Promise<OciHostStatus> {
-    const scope = scopeValue(supplied), key = keyOf(scope); await this.#authorize(capability, scope, signal, false);
-    let accepted = true; try { await this.#phone(signal); } catch { accepted = false; }
+  async status(capability: string, supplied: ControlScope, signal: AbortSignal, suppliedMode?: BrowserControlMode): Promise<OciHostStatus> {
+    const scope = scopeValue(supplied), key = keyOf(scope), configured = this.#configured.get(key); await this.#authorize(capability, scope, signal, false);
+    const mode = browserControlModeSchema.safeParse(suppliedMode ?? configured?.controlMode ?? "remote");
+    if (!mode.success || (configured && mode.data !== configured.controlMode)) fail("invalid_target");
+    let accepted = true; try { await this.#phone(signal, mode.data); } catch { accepted = false; }
     const run = this.#runs.get(key); if (run && !run.stopped) this.#live(run); return this.#public(run, key, accepted);
   }
   #operation<T>(run: Run, signal: AbortSignal, trusted: boolean, stopOnAbort: boolean,
@@ -210,7 +220,9 @@ export class ConsoleHostJobs {
     if (run.phase === "starting") fail("busy"); if (run.phase !== "user_control" || !run.browser) fail("inactive");
     const revision = run.proofRevision;
     return this.#operation(run, signal, false, input, async (stopped, authorized) => {
-      const expiry = await this.#authorize(capability, scope, stopped); this.#refresh(run, capability, expiry, revision); authorized(); this.#live(run);
+      const expiry = await this.#authorize(capability, scope, stopped); this.#refresh(run, capability, expiry, revision);
+      if (run.controlMode !== "remote") fail("inactive");
+      authorized(); this.#live(run);
       const result = await action(run.browser!, run); this.#live(run);
       const after = await this.#authorize(capability, scope, stopped); this.#refresh(run, capability, after, revision); return result;
     }, revision);

@@ -15,12 +15,12 @@ import type { ConsoleBrowser } from "../oci-console-browser.ts";
 import { StaleFrameError } from "../frame-error.ts";
 
 const options = { skip: !supportedConsoleFixture, timeout: 25000, concurrency: false };
-async function fixture(t: TestContext, defaults: { realSources?: boolean; delayMetadataMs?: number } = {}) {
+async function fixture(t: TestContext, defaults: { realSources?: boolean; delayMetadataMs?: number; controlMode?: "remote" | "host"; refuseInputFence?: boolean } = {}) {
   const root = await mkdtemp(join(await realpath(tmpdir()), "owned-console-browser-")); await chmod(root, 0o700);
   await promisify(execFile)("/usr/bin/openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=loopback-console", "-keyout", join(root, "key.pem"), "-out", join(root, "cert.pem")]);
   const data = join(root, "private"); await (await import("node:fs/promises")).mkdir(data, { mode: 0o700 });
   const state = { reads: 0, refresh: 0, unrelated: 0, owned: true, sourceValid: true, beforeRead: async () => {}, beforeOther: async () => {}, onPausedPage: () => {} };
-  const html = `<!doctype html><title>Console ${expectedConsole.userOcid}</title><h1>Owned Console</h1><h2>${expectedConsole.tenancyOcid}</h2><form><h2>private form heading</h2><input value="fixture-secret"></form><script>
+  const html = `<!doctype html><title>Console ${expectedConsole.userOcid}</title><h1>Owned Console</h1><h2>${expectedConsole.tenancyOcid}</h2><form><h2>private form heading</h2><input value="fixture-secret"></form><button id="local-effect" onclick="globalThis.localEffects=(globalThis.localEffects||0)+1">Local effect</button><script>
   const identity={sub:${JSON.stringify(expectedConsole.userOcid)},tenant:${JSON.stringify(expectedConsole.tenancyOcid)},domain_ocid:${JSON.stringify(expectedConsole.domainOcid)},domain_stripe_url:${JSON.stringify(expectedConsole.domainOrigin)},nonce:"generation-1"};
   const authenticator={getIdentityToken:async()=>({...identity}),getOverrideTenant:async()=>undefined};
   const signed=async resource=>{if(globalThis.refreshBeforeRead)await fetch(${JSON.stringify(expectedConsole.domainOrigin)}+"/oauth2/v1/token",{method:"POST"});const request=new Request(resource);request.headers.set("Authorization",'Signature keyId="ST$fixture-private",version="1",algorithm="rsa-sha256",signature="fixture"');return fetch(request);};
@@ -45,12 +45,12 @@ async function fixture(t: TestContext, defaults: { realSources?: boolean; delayM
   const launch = async (input: Parameters<typeof puppeteer.launch>[0]) => {
     launchOptions=input;browser=await puppeteer.launch({...input,acceptInsecureCerts:true,args:[...input?.args??[],`--host-resolver-rules=MAP * 127.0.0.1:${address.port}`]});
     const target=browser.target(),create=target.createCDPSession.bind(target);t.mock.method(target,"createCDPSession",async()=>{const session=await create();session.on("Target.attachedToTarget",event=>{if(event.targetInfo.type==="page"&&event.waitingForDebugger)state.onPausedPage();});return session;});
-    if(defaults.delayMetadataMs){const createContext=browser.createBrowserContext.bind(browser);t.mock.method(browser,"createBrowserContext",async (settings:Parameters<Browser["createBrowserContext"]>[0])=>{const context=await createContext(settings),newPage=context.newPage.bind(context);t.mock.method(context,"newPage",async()=>{const page=await newPage(),createSession=page.createCDPSession.bind(page);let first=true;t.mock.method(page,"createCDPSession",async()=>{const session=await createSession();if(first){first=false;const on=session.on.bind(session);t.mock.method(session,"on",((type:string,listener:(event:any)=>void)=>on(type as never,(event:any)=>{if(type==="Network.requestWillBeSent"&&event.request.headers["opc-request-id"])setTimeout(()=>listener(event),defaults.delayMetadataMs);else listener(event);})) as typeof session.on);}return session;});return page;});return context;});}
+    if(defaults.delayMetadataMs || defaults.refuseInputFence){const createContext=browser.createBrowserContext.bind(browser);t.mock.method(browser,"createBrowserContext",async (settings:Parameters<Browser["createBrowserContext"]>[0])=>{const context=await createContext(settings),newPage=context.newPage.bind(context);t.mock.method(context,"newPage",async()=>{const page=await newPage(),createSession=page.createCDPSession.bind(page);let first=true;t.mock.method(page,"createCDPSession",async()=>{const session=await createSession();if(defaults.refuseInputFence){const send=session.send.bind(session);t.mock.method(session,"send",((method:string,...args:unknown[])=>{if(method==="Input.setIgnoreInputEvents")throw Error("fixture missing fence ACK");return Reflect.apply(send,session,[method,...args]);}) as typeof session.send);}if(first){first=false;const on=session.on.bind(session);t.mock.method(session,"on",((type:string,listener:(event:any)=>void)=>on(type as never,(event:any)=>{if(type==="Network.requestWillBeSent"&&event.request.headers["opc-request-id"])setTimeout(()=>listener(event),defaults.delayMetadataMs);else listener(event);})) as typeof session.on);}return session;});return page;});return context;});}
     return browser;
   };
   const sources = (page: Page): ConsoleSourceBoundary => { const proofs=new WeakSet<ConsoleSourceProof>();let disposed=false;return {async capture(signal){signal.throwIfAborted();const p=Object.freeze({}) as ConsoleSourceProof;proofs.add(p);return p;},assert(p){if(disposed||!state.sourceValid||!proofs.has(p))throw Error("fixture source");},dispose(){disposed=true;}}; };
   const { openOciConsoleBrowser } = await import("../oci-console-browser.ts");
-  driver = await openOciConsoleBrowser({tempDir:data,expected:expectedConsole,scope:consoleScope,expiresAt:Date.now()+60000,lifecycle:lifecycle.signal,assertOwned:async()=>{if(!state.owned)throw Error("owner changed");},dependencies:{launch,...defaults.realSources?{}:{sources}}});
+  driver = await openOciConsoleBrowser({controlMode:defaults.controlMode,tempDir:data,expected:expectedConsole,scope:consoleScope,expiresAt:Date.now()+60000,lifecycle:lifecycle.signal,assertOwned:async()=>{if(!state.owned)throw Error("owner changed");},dependencies:{launch,...defaults.realSources?{}:{sources}}});
   const page=(await browser!.pages()).find(p=>p.url().startsWith("https://cloud.oracle.com"))!;
   return {driver,page,state,data,launchOptions,browser:browser!,lifecycle};
 }
@@ -253,4 +253,48 @@ test("new pages remain debugger-paused before any traffic even while exact brows
 
 test("exact preflight waits for its owned-frame CDP provenance instead of assuming cross-session event order", options, async t => {
   const f=await fixture(t,{delayMetadataMs:50});assert.equal((await f.driver.verify(new AbortController().signal)).matched,true);assert.equal(f.state.reads,1);
+});
+
+
+test("host Console uses its visible private context and fences renderer input before retained verification", options, async t => {
+  const f = await fixture(t, { controlMode: "host" }), context = f.page.browserContext();
+  assert.equal(f.launchOptions?.headless, false, "Explicit host mode must create a visible owned Console window.");
+  let claims = 0;
+  await assert.rejects(f.driver.frame());
+  await assert.rejects(f.driver.input({ type: "text", text: "remote effect" }, "00000000-0000-4000-8000-000000000000", () => { claims++; }));
+  assert.equal(claims, 0);
+  await f.page.focus("input"); await f.page.keyboard.type("local draft");
+  const before = await f.page.$eval("input", input => input.value);
+  assert.ok(before.includes("local draft"), "Renderer keyboard input must work before handback.");
+  await f.page.click("#local-effect");
+  assert.equal(await f.page.evaluate(() => (globalThis as any).localEffects), 1);
+  f.state.beforeRead = async () => {
+    await f.page.focus("input"); await f.page.keyboard.type("concurrent input");
+    await f.page.click("#local-effect");
+    assert.equal(await f.page.evaluate(() => (globalThis as any).localEffects), 1, "Mouse input must be blocked before the signed read.");
+    assert.equal(await f.page.$eval("input", input => input.value), before, "Input must be fenced before the signed identity read begins.");
+  };
+  assert.equal((await f.driver.verify(new AbortController().signal)).matched, true);
+  await f.driver.assertRetained(new AbortController().signal);
+  assert.equal(f.page.browserContext(), context);
+  await f.page.focus("input"); await f.page.keyboard.type("retained input");
+  assert.equal(await f.page.$eval("input", input => input.value), before);
+});
+
+test("host Console never verifies or retains a page when the renderer input fence has no ACK", options, async t => {
+  const f = await fixture(t, { controlMode: "host", refuseInputFence: true });
+  await assert.rejects(f.driver.verify(new AbortController().signal));
+  assert.equal(f.state.reads, 0, "No signed identity request may precede the input-fence acknowledgement.");
+  assert.equal(f.browser.connected, false);
+});
+
+
+test("null Console presentation mode refuses before browser launch", async t => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "console-invalid-mode-")); await chmod(root, 0o700);
+  t.after(() => rm(root, { recursive: true, force: true })); let launches = 0;
+  const { openOciConsoleBrowser } = await import("../oci-console-browser.ts");
+  await assert.rejects(Reflect.apply(openOciConsoleBrowser, undefined, [{ controlMode: null, tempDir: root, expected: expectedConsole, scope: consoleScope,
+    expiresAt: Date.now() + 60000, lifecycle: new AbortController().signal, assertOwned: async () => {},
+    dependencies: { launch: async () => { launches++; throw new Error("unexpected launch"); } } }]));
+  assert.equal(launches, 0); assert.deepEqual(await readdir(root), []);
 });

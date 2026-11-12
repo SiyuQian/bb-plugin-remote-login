@@ -9,6 +9,8 @@ import puppeteer, { ProtocolError } from "puppeteer-core";
 import { StaleFrameError } from "../frame-error.ts";
 import { isSupportedOciBrowserUrl, openOciProviderBrowser, OciProviderBrowserError } from "../oci-provider-browser.ts";
 import { createOwnedOciSession, releaseOwnedOciSession } from "../oci-owned-session.ts";
+import { ownedCliServiceFixture } from "./owned-cli-service-fixture.ts";
+import type { Browser, Page } from "puppeteer-core";
 import { OwnedResourceLedger } from "../owned-resource-ledger.ts";
 
 const expected = { mode: "oci_cli" as const, tenancyOcid: "ocid1.tenancy.oc1..fixture", userOcid: "ocid1.user.oc1..fixture", region: "ap-sydney-1", realm: "oc1" as const };
@@ -82,7 +84,7 @@ async function ownedBrowserFixture(t: TestContext, closing: Promise<void> = Prom
   const context = { newPage: async () => page };
   let browserClosures = 0;
   const browser = Object.assign(new EventEmitter(), {
-    connected: true, process: () => child, version: async () => "Chrome/157.0.8103.50",
+    connected: true, process: () => child, version: async () => "Chrome/157.0.8103.51",
     createBrowserContext: async () => context, pages: async () => [page],
     close: async () => { browserClosures++; await closing; child.exitCode = 0; child.emit("exit", 0); child.emit("close", 0); },
   });
@@ -501,4 +503,88 @@ test("uncertain browser launch leaves its session writer pending and forbids ses
   assert.equal((await journal(root)).writers[0]?.state, "pending");
   assert.ok((await journal(root)).writers[0]?.directory?.name.startsWith("oci-browser-"));
   await assert.rejects(releaseOwnedOciSession(session));
+});
+
+
+test("host CLI opens a visible owned provider window and refuses remote frame and input", { skip: !supported, timeout: 20000 }, async t => {
+  let page: Page | undefined;
+  const service = await ownedCliServiceFixture(t, { onProviderPage: value => { page = value; } });
+  const root = await mkdtemp(join(await realpath(tmpdir()), "oci-local-browser-")); await chmod(root, 0o700);
+  const launch = puppeteer.launch.bind(puppeteer);
+  let browser: Browser | undefined, headless: unknown;
+  t.mock.method(puppeteer, "launch", async (settings: Parameters<typeof puppeteer.launch>[0]) => {
+    headless = settings?.headless; browser = await launch(settings); return browser;
+  });
+  let driver: Awaited<ReturnType<typeof openOciProviderBrowser>> | undefined;
+  try {
+    driver = await Reflect.apply(openOciProviderBrowser, undefined, [root, authorizationUrl(), new AbortController().signal, undefined, "host"]);
+    assert.equal(headless, false, "Host CLI login must use a visible owned provider window.");
+    page ??= (await browser!.pages())[0]!;
+    assert.equal(await page.title(), "Account-free CLI fixture");
+    let effects = 0;
+    await assert.rejects(driver.frame(), OciProviderBrowserError);
+    await assert.rejects(driver.input({ type: "text", text: "remote text" }, "00000000-0000-4000-8000-000000000000", () => { effects++; }), OciProviderBrowserError);
+    assert.equal(effects, 0); assert.equal(browser!.connected, true);
+    assert.equal(service.state.documents, 1);
+    await page.evaluate(() => {
+      const input = document.createElement("input"); input.id = "local-input"; input.style.position = "fixed"; input.style.top = "10px";
+      const button = document.createElement("button"); button.id = "local-effect"; button.textContent = "Local input fixture";
+      button.onclick = () => { document.body.dataset.effects = String(Number(document.body.dataset.effects ?? "0") + 1); };
+      document.body.append(input, button);
+    });
+    await page.focus("#local-input"); await page.keyboard.type("before handback"); await page.click("#local-effect");
+    assert.equal(await page.$eval("#local-input", input => (input as HTMLInputElement).value), "before handback");
+    assert.equal(await page.evaluate(() => document.body.dataset.effects), "1");
+    const block = Reflect.get(driver, "blockLocalInput");
+    if (block) await block.call(driver);
+    await page.focus("#local-input"); await page.keyboard.type("after handback"); await page.click("#local-effect");
+    assert.equal(await page.$eval("#local-input", input => (input as HTMLInputElement).value), "before handback", "Local keyboard input must stop before waiting for the CLI callback.");
+    assert.equal(await page.evaluate(() => document.body.dataset.effects), "1", "Local mouse input must stop before waiting for the CLI callback.");
+  } finally {
+    await driver?.close();
+    assert.ok(service.state.browserTransports.every(value => value.closed));
+    assert.deepEqual(await readdir(root), []);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("unknown provider presentation modes refuse before browser launch", async t => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "oci-invalid-mode-")); await chmod(root, 0o700);
+  t.after(() => rm(root, { recursive: true, force: true })); let launches = 0;
+  t.mock.method(puppeteer, "launch", async () => { launches++; throw new Error("unexpected launch"); });
+  await assert.rejects(Reflect.apply(openOciProviderBrowser, undefined, [root, authorizationUrl(), new AbortController().signal, undefined, "unknown"]), error => error instanceof OciProviderBrowserError && !error.cleanupUncertain);
+  assert.equal(launches, 0); assert.deepEqual(await readdir(root), []);
+});
+
+test("a refused local CLI input fence closes its exact browser before handback can wait", { skip: !supported, timeout: 20000 }, async t => {
+  let browser: Browser | undefined, fenceRequests = 0;
+  const service = await ownedCliServiceFixture(t, { onProviderPage: page => {
+    const create = page.createCDPSession.bind(page);
+    t.mock.method(page, "createCDPSession", async () => {
+      const session = await create(), send = session.send.bind(session);
+      t.mock.method(session, "send", ((method: string, ...args: unknown[]) => {
+        if (method === "Input.setIgnoreInputEvents") { fenceRequests++; return Promise.reject(new Error("fixture fence refused")); }
+        return Reflect.apply(send, session, [method, ...args]);
+      }) as typeof session.send);
+      return session;
+    });
+  } });
+  const root = await mkdtemp(join(await realpath(tmpdir()), "oci-refused-local-fence-")); await chmod(root, 0o700);
+  const launch = puppeteer.launch.bind(puppeteer);
+  t.mock.method(puppeteer, "launch", async (settings: Parameters<typeof puppeteer.launch>[0]) => { browser = await launch(settings); return browser; });
+  let driver: Awaited<ReturnType<typeof openOciProviderBrowser>> | undefined;
+  try {
+    driver = await openOciProviderBrowser(root, authorizationUrl(), new AbortController().signal, undefined, "host");
+    await assert.rejects(async () => {
+      const block = Reflect.get(driver!, "blockLocalInput");
+      if (block) await block.call(driver);
+    }, OciProviderBrowserError);
+    assert.equal(fenceRequests, 1); assert.equal(browser!.connected, false);
+  } finally {
+    await driver?.close();
+    assert.ok(service.state.browserTransports.every(value => value.closed));
+    assert.deepEqual(await readdir(root), []);
+    await rm(root, { recursive: true, force: true });
+  }
 });

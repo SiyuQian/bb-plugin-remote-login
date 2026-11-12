@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import type { TestContext } from "node:test";
+import type { BrowserControlMode } from "../browser-control.ts";
 import type { BbPluginApi, PluginAgentToolResult } from "@get-bb/plugin-sdk";
 import { createFakePluginHost, makeHostResponse, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
@@ -65,8 +66,20 @@ export async function ownedConsoleFlow(t: TestContext) {
   const authority = new ControlAuthority(dataDir), gate = new PairedControlGate(dataDir, authority);
   let retained = 0;
   const retain = () => { retained++; return { dispose: async () => { retained--; } }; };
+  const fixtureBrowsers: Browser[] = [], fixturePages: Page[] = [];
   const fixture = new FixtureLease({ lifecycle: lifecycle.signal,
-    authorize: (capability, scope) => authority.authorize(capability, scope), open: signal => openFixtureBrowser(dataDir, signal) });
+    authorize: (capability, scope) => authority.authorize(capability, scope), open: async (signal, controlMode) => {
+      const launch = puppeteer.launch.bind(puppeteer), opened: Browser[] = [];
+      const capture = t.mock.method(puppeteer, "launch", async (options: Parameters<typeof puppeteer.launch>[0]) => {
+        const browser = await launch(options); opened.push(browser); return browser;
+      });
+      try {
+        const driver = await openFixtureBrowser(dataDir, signal, controlMode);
+        fixtureBrowsers.push(...opened);
+        for (const browser of opened) fixturePages.push(...await browser.pages());
+        return driver;
+      } finally { capture.mock.restore(); }
+    } });
   const state = {
     profile: { active: true, ocid: expectedConsole.userOcid, tenancyOcid: expectedConsole.tenancyOcid, domainOcid: expectedConsole.domainOcid } as Record<string, unknown>,
     reads: 0, readAborted: 0, inputs: 0, beforeRead: async () => {},
@@ -80,7 +93,7 @@ export async function ownedConsoleFlow(t: TestContext) {
     await Promise.allSettled(waits.map(wait => wait.result));
     await cleanup.harness?.lifecycle.dispose(); lifecycle.abort();
     await Promise.allSettled([fixture.dispose(), cleanup.jobs?.dispose()]);
-    await Promise.allSettled(browsers.map(browser => browser.close()));
+    await Promise.allSettled([...browsers, ...fixtureBrowsers].map(browser => browser.close()));
     if (cleanup.server) {
       cleanup.server.closeAllConnections();
       await new Promise<void>(resolve => cleanup.server!.close(() => resolve()));
@@ -120,7 +133,7 @@ export async function ownedConsoleFlow(t: TestContext) {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); if (!address || typeof address === "string") throw new Error("Loopback fixture unavailable");
   const jobs = new ConsoleHostJobs({ dataDir, lifecycle: lifecycle.signal,
-    authorize: (capability, scope) => authority.authorize(capability, scope), requirePhoneGate: () => gate.require(),
+    authorize: (capability, scope) => authority.authorize(capability, scope), requirePhoneGate: mode => gate.require(mode),
     dependencies: { openBrowser: async input => {
       const driver = await openOciConsoleBrowser({ ...input, dependencies: {
       launch: async options => {
@@ -157,7 +170,7 @@ export async function ownedConsoleFlow(t: TestContext) {
   }, experimental_callHostRpc: async ({ hostId: target, method, input, signal }) => {
     assert.equal(target, hostId);
     const stopped = signal ?? lifecycle.signal;
-    const p = input as { capability: string; scope: ControlScope; deadline?: number; key: string; expected: ConsoleExpectedIdentity;
+    const p = input as { controlMode?: BrowserControlMode; capability: string; scope: ControlScope; deadline?: number; key: string; expected: ConsoleExpectedIdentity;
       event: FixtureInput; inputId: string; frameRef: string; receipt: string; browserRef: string; request: ConsoleReadRequest };
     try {
       stopped.throwIfAborted();
@@ -172,17 +185,20 @@ export async function ownedConsoleFlow(t: TestContext) {
         }
         case "authorizeControl": await authority.authorize(p.capability, p.scope); return { ok: true };
         case "revokeControl": await authority.revoke(p.capability, p.scope); await fixture.stopForScope(p.scope); if (jobs.hasScope(p.scope)) await jobs.stopForScope(p.scope); return { ok: true };
-        case "startFixture": return { ok: true, viewport: await fixture.start(p.capability, p.scope, stopped, retain) };
+        case "startFixture": return { ok: true, viewport: await fixture.start(p.capability, p.scope, stopped, retain, p.controlMode) };
         case "frameFixture": return { ok: true, frame: await fixture.frame(p.capability, p.scope, stopped) };
         case "inputFixture": await fixture.input(p.capability, p.scope, p.event, stopped, p.inputId, p.frameRef); return { ok: true };
-        case "completePhoneFixture": return { ok: true, verified: await gate.acceptClosedFixture(p.capability, p.scope, stopped, async () => {
-          if (!await fixture.verify(p.capability, p.scope, stopped)) return false;
-          await fixture.close(p.capability, p.scope, stopped); return true;
-        }) };
+        case "completePhoneFixture": {
+          const controlMode = await fixture.controlMode(p.capability, p.scope, stopped);
+          return { ok: true, verified: await gate.acceptClosedFixture(p.capability, p.scope, stopped, async () => {
+            if (!await fixture.verify(p.capability, p.scope, stopped)) return false;
+            await fixture.close(p.capability, p.scope, stopped); return true;
+          }, controlMode) };
+        }
         case "closeFixture": await fixture.close(p.capability, p.scope, stopped); return { ok: true };
-        case "consoleStatus": return { ok: true, status: await jobs.status(p.capability, p.scope, stopped) };
-        case "configureConsole": await jobs.configure(p.capability, p.scope, p.expected, stopped); return { ok: true };
-        case "startConsole": return { ok: true, viewport: await jobs.start(p.capability, p.scope, stopped, retain) };
+        case "consoleStatus": return { ok: true, status: await jobs.status(p.capability, p.scope, stopped, p.controlMode) };
+        case "configureConsole": await jobs.configure(p.capability, p.scope, p.expected, stopped, p.controlMode); return { ok: true };
+        case "startConsole": return { ok: true, viewport: await jobs.start(p.capability, p.scope, stopped, retain, p.controlMode) };
         case "frameConsole": return { ok: true, frame: await jobs.frame(p.capability, p.scope, stopped) };
         case "inputConsole": await jobs.input(p.capability, p.scope, p.event, stopped, p.inputId, p.frameRef); return { ok: true };
         case "handbackConsole": return { ok: true, result: await jobs.handback(p.capability, p.scope, stopped) };
@@ -281,6 +297,6 @@ export async function ownedConsoleFlow(t: TestContext) {
       return completed;
     });
   }
-  return { bb, harness, root, dataDir, state, browsers, pages, capabilities, hostChoice, createPairingAttempt, createConsoleAttempt, startNativeWait, pair, waitConsole, start, finishHandback,
+  return { bb, harness, root, dataDir, state, browsers, pages, fixtureBrowsers, fixturePages, gate, capabilities, hostChoice, createPairingAttempt, createConsoleAttempt, startNativeWait, pair, waitConsole, start, finishHandback,
     retained: () => retained };
 }

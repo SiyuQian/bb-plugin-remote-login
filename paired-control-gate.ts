@@ -1,3 +1,4 @@
+import { browserControlModeSchema, type BrowserControlMode } from "./browser-control.ts";
 import { randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import fs from "node:fs/promises";
@@ -6,9 +7,11 @@ import { z } from "zod";
 import type { ControlAuthority, ControlScope } from "./control-authority.ts";
 
 const lifetime = 86_400_000;
-const pin = "private-fixture/Chrome-157.0.8103.50/v1";
+const pin = "private-fixture/Chrome-157.0.8103.51/v1";
+// An old, otherwise valid receipt may be replaced only by a fresh protected producer.
+const readablePin = z.enum([pin, "private-fixture/Chrome-157.0.8103.50/v1"]);
 const receiptSchema = z.object({ version: z.literal(1), generation: z.string().regex(/^[a-f0-9]{64}$/),
-  pin: z.literal(pin), nonce: z.string().uuid(), acceptedAt: z.number().int().nonnegative(), expiresAt: z.number().int().positive(),
+  pin: readablePin, controlMode: browserControlModeSchema.optional(), nonce: z.string().uuid(), acceptedAt: z.number().int().nonnegative(), expiresAt: z.number().int().positive(),
 }).strict().refine((v) => v.expiresAt - v.acceptedAt === lifetime);
 export class PairedControlGateError extends Error {
   readonly code = "phone_control_required";
@@ -50,19 +53,20 @@ export class PairedControlGate {
       return receiptSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size))));
     } finally { await handle.close(); }
   }
-  async accepted(): Promise<boolean> {
+  async accepted(controlMode: BrowserControlMode = "remote"): Promise<boolean> {
     try {
       const generation = await this.#authority.generation(), receipt = await this.#read(), now = this.#now();
-      return Boolean(receipt && Number.isSafeInteger(now) && now >= receipt.acceptedAt && now < receipt.expiresAt
+      return Boolean(browserControlModeSchema.safeParse(controlMode).success && receipt && receipt.pin === pin && (receipt.controlMode ?? "remote") === controlMode && Number.isSafeInteger(now) && now >= receipt.acceptedAt && now < receipt.expiresAt
         && receipt.generation === generation && generation === await this.#authority.generation());
     } catch { return false; }
   }
-  async require(): Promise<void> { if (!await this.accepted()) fail(); }
+  async require(controlMode: BrowserControlMode = "remote"): Promise<void> { if (!await this.accepted(controlMode)) fail(); }
   /** Host-only producer: the callback must verify its owned fixture and confirm that exact browser's closure. */
-  async acceptClosedFixture(capability: string, scope: ControlScope, signal: AbortSignal, verifyAndClose: () => Promise<boolean>): Promise<boolean> {
+  async acceptClosedFixture(capability: string, scope: ControlScope, signal: AbortSignal, verifyAndClose: () => Promise<boolean>, controlMode: BrowserControlMode = "remote"): Promise<boolean> {
     let temporary: string | undefined;
     let created: Stats | undefined, committed = false;
     try {
+      if (!browserControlModeSchema.safeParse(controlMode).success) fail();
       signal.throwIfAborted(); await this.#authority.authorize(capability, scope);
       const generation = await this.#authority.generation();
       const verified = await verifyAndClose();
@@ -71,7 +75,7 @@ export class PairedControlGate {
       if (generation !== await this.#authority.generation()) fail();
       const directory = await this.#directory(); await this.#read();
       const now = this.#now(); if (!Number.isSafeInteger(now) || now < 0) fail();
-      const receipt = receiptSchema.parse({ version: 1, generation, pin, nonce: randomUUID(), acceptedAt: now, expiresAt: now + lifetime });
+      const receipt = receiptSchema.parse({ version: 1, generation, pin, controlMode, nonce: randomUUID(), acceptedAt: now, expiresAt: now + lifetime });
       temporary = join(this.#dataDir, `.paired-control-${randomUUID()}.tmp`);
       const handle = await fs.open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
       try { privateStat(await handle.stat(), false); await handle.writeFile(JSON.stringify(receipt)); await handle.sync(); created = await handle.stat(); }

@@ -64,6 +64,26 @@ async function system(t: { after(fn: () => unknown): void }, initialRoot: string
   return { bb, harness, environment, state, calls, inputs, attemptId, post, status };
 }
 
+test("host mode persists on its bound job, refuses remote observation and still requires independent handback", async t => {
+  const s = await system(t);
+  assert.equal((await s.post("start", { controlMode: "host" }, null)).status, 401);
+  assert.equal(s.calls.includes("startFixture"), false);
+  assert.equal((await s.post("start", { controlMode: "host" })).status, 200);
+  const opened = s.inputs.find(call => call.method === "startFixture")!.input as any;
+  assert.equal(opened.controlMode, "host");
+  assert.equal((await s.status()).controlMode, "host");
+  assert.equal((await s.post("frame")).status, 409);
+  assert.equal((await s.post("input", { frameRef, event: { type: "key", key: "Enter" } })).status, 409);
+  assert.equal(s.calls.includes("frameFixture") || s.calls.includes("inputFixture"), false);
+  assert.equal((await s.post("start", { controlMode: "remote" })).status, 409);
+  assert.equal((await s.post("handback")).status, 409);
+  assert.equal((await s.status()).phase, "user_control");
+  s.state.verified = true;
+  assert.equal((await s.post("handback")).status, 200);
+  assert.equal((await s.status()).phase, "verified");
+  assert.equal((await s.status()).controlMode, "host");
+});
+
 test("job stale input is recoverable only while its post-host root and binding are still current", async t => {
   const s = await system(t); await s.post("start"); s.state.staleInput = true;
   const stale = await s.post("input", { frameRef, event: { type: "key", key: "Enter" } });

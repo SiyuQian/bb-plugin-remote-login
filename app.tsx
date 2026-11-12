@@ -28,7 +28,7 @@ function WaitProbe({ submit, cancel }: PluginPendingInteractionProps) {
 }
 
 export default definePluginApp((app) => {
-  app.slots.navPanel({ id: "pairing", title: "手机配对", icon: "KeyRound", path: "pairing", component: PairingPage });
+  app.slots.navPanel({ id: "pairing", title: "控制配对", icon: "KeyRound", path: "pairing", component: PairingPage });
   app.slots.navPanel({ id: "login-attempts", title: "登录会话", icon: "KeyRound", path: "attempts", component: LoginStatusPage });
   app.slots.navPanel({ id: "capabilities", title: "远程登录诊断", icon: "KeyRound", path: "capabilities", component: ProviderCapabilitiesPage });
   app.slots.pendingInteraction({ id: "wait-probe", component: WaitProbe });

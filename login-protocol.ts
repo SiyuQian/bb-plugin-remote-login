@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { browserControlModeSchema } from "./browser-control.ts";
 
 const id = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -27,7 +28,7 @@ function stopped(phase: AttemptPhase): boolean {
 
 /** Non-secret durable attempt record; provider evidence is a bounded identifier only. */
 export const loginAttemptSchema = identitySchema.extend({
-  version: z.literal(1), mode: modeSchema, phase: phaseSchema, revision: integer,
+  version: z.literal(1), mode: modeSchema, controlMode: browserControlModeSchema.optional(), phase: phaseSchema, revision: integer,
   createdAt: integer, updatedAt: integer, expiresAt: integer,
   verification: z.object({ id, kind: modeSchema, verifiedAt: integer }).strict().nullable(),
   resume: z.object({
@@ -69,7 +70,8 @@ export const attemptEventSchema = z.discriminatedUnion("type", [
   eventBase.extend({ type: z.literal("paired"), principalId: id }),
   eventBase.extend({ type: z.literal("check_existing") }),
   eventBase.extend({ type: z.literal("login_required") }),
-  eventBase.extend({ type: z.literal("start") }),
+  eventBase.extend({ type: z.literal("select_control"), controlMode: browserControlModeSchema }),
+  eventBase.extend({ type: z.literal("start"), controlMode: browserControlModeSchema.optional() }),
   eventBase.extend({ type: z.literal("ready") }),
   eventBase.extend({ type: z.literal("handback") }),
   eventBase.extend({ type: z.literal("verification_retry") }),
@@ -136,8 +138,14 @@ export function reduceAttempt(input: LoginAttempt, command: AttemptEvent, now: n
       if (attempt.phase !== "checking_existing") fail("invalid_transition");
       next.phase = "awaiting_control";
       break;
+    case "select_control":
+      if (attempt.phase !== "awaiting_control" || (attempt.controlMode !== undefined && attempt.controlMode !== event.controlMode)) fail("invalid_transition");
+      next.controlMode = event.controlMode;
+      break;
     case "start":
       if (attempt.phase !== "awaiting_control") fail("invalid_transition");
+      if (attempt.controlMode !== undefined && event.controlMode !== undefined && attempt.controlMode !== event.controlMode) fail("invalid_transition");
+      if (event.controlMode !== undefined) next.controlMode = event.controlMode;
       next.phase = "starting";
       break;
     case "ready":

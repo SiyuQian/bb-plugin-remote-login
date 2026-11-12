@@ -5,14 +5,15 @@ import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import puppeteer, { type Browser, type BrowserContext, type Page, type Target } from "puppeteer-core";
+import puppeteer, { type Browser, type BrowserContext, type CDPSession, type Page, type Target } from "puppeteer-core";
 import { fixtureInputSchema, type FixtureFrame, type FixtureInput } from "./fixture-wire.ts";
 import { FrameObservation } from "./frame-observation.ts";
 import { StaleFrameError } from "./frame-error.ts";
+import { browserControlModeSchema, type BrowserControlMode } from "./browser-control.ts";
 
 const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 // Chrome auto-updates must fail closed until the private-browser probe is revalidated.
-const testedChromeVersion = "157.0.8103.50";
+const testedChromeVersion = "157.0.8103.51";
 const runFile = promisify(execFile);
 
 /** A single synthetic page; no URL, script, selector, profile or CDP capabilities. */
@@ -77,13 +78,15 @@ function fixture(marker: string): string {
 }
 
 /** Open only the version-validated, no-network synthetic fixture in an existing private parent. */
-export async function openFixtureBrowser(tempDir: string, signal: AbortSignal): Promise<FixtureBrowser> {
+export async function openFixtureBrowser(tempDir: string, signal: AbortSignal, controlMode: BrowserControlMode = "remote"): Promise<FixtureBrowser> {
+  if (!browserControlModeSchema.safeParse(controlMode).success) throw new FixtureBrowserError();
   let parent: Stats | undefined;
   let profile: { path: string; identity: Stats } | undefined;
   let browser: Browser | undefined;
   let context: BrowserContext | undefined;
   let page: Page | undefined;
   let target: Target | undefined;
+  let inputSession: CDPSession | undefined;
   let launchAttempted = false;
   let ready = false;
   let stopped = signal.aborted;
@@ -181,7 +184,7 @@ export async function openFixtureBrowser(tempDir: string, signal: AbortSignal): 
     // A launch rejection without that handle retains the profile and reports uncertainty.
     browser = await puppeteer.launch({
       browser: "chrome", executablePath: chromePath, userDataDir: path,
-      headless: true, pipe: true, dumpio: false, timeout: 10_000, protocolTimeout: 3000,
+      headless: controlMode !== "host", pipe: true, dumpio: false, timeout: 10_000, protocolTimeout: 3000,
       allowlist: ["about\\:blank"], logger: () => undefined,
     });
     assertActive();
@@ -212,11 +215,13 @@ export async function openFixtureBrowser(tempDir: string, signal: AbortSignal): 
     page.on("dialog", invalidate);
     page.on("error", invalidate);
     page.on("close", () => { if (!stopped) invalidate(); });
+    if (controlMode === "host") { inputSession = await page.createCDPSession(); await page.bringToFront(); }
     ready = true;
     await assertTarget();
     const ownedPage = page;
     return {
       frame: async () => {
+        if (controlMode === "host") throw new FixtureBrowserError();
         const captured = await run(async () => {
           const ticket = observation.begin();
           const screenshot = await ownedPage.screenshot({ type: "png", fullPage: false });
@@ -234,8 +239,17 @@ export async function openFixtureBrowser(tempDir: string, signal: AbortSignal): 
         if (frameRef === null) throw new StaleFrameError();
         return { ...captured.frame, frameRef };
       },
-      verify: () => { observation.invalidate(); return run(() => ownedPage.evaluate(() => Boolean(document.querySelector("output")?.textContent?.trim()))); },
+      verify: () => {
+        observation.invalidate();
+        return run(async () => {
+          if (controlMode === "host") await inputSession!.send("Input.setIgnoreInputEvents", { ignore: true });
+          const verified = await ownedPage.evaluate(() => Boolean(document.querySelector("output")?.textContent?.trim()));
+          if (controlMode === "host" && !verified) await inputSession!.send("Input.setIgnoreInputEvents", { ignore: false });
+          return verified;
+        });
+      },
       input: async (event, frameRef, claimInput) => {
+        if (controlMode === "host") throw new FixtureBrowserError();
         const result = await run(async () => {
           const input = fixtureInputSchema.parse(event);
           claimInput();

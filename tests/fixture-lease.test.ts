@@ -52,7 +52,7 @@ class Driver implements FixtureBrowser {
   async close() { this.closed++; await this.closeGate; }
 }
 
-async function fixture(t: TestContext, options: { open?: (signal: AbortSignal) => Promise<FixtureBrowser> } = {}) {
+async function fixture(t: TestContext, options: { open?: (signal: AbortSignal, controlMode?: unknown) => Promise<FixtureBrowser> } = {}) {
   const parent = await fs.mkdtemp(join(tmpdir(), "remote-login-lease-test-"));
   t.after(() => fs.rm(parent, { recursive: true, force: true }));
   const dataDir = join(parent, "private");
@@ -72,7 +72,7 @@ async function fixture(t: TestContext, options: { open?: (signal: AbortSignal) =
       await afterAuthorize?.(capability);
       return expiry;
     },
-    open: async (signal) => { opened++; return options.open ? await options.open(signal) : driver; },
+    open: async (signal, controlMode) => { opened++; return options.open ? await options.open(signal, controlMode) : driver; },
     lifecycle: lifecycle.signal,
     now: () => now,
   });
@@ -878,4 +878,40 @@ test("capture change synthetic read still closes on post-authorization loss or s
     await assert.rejects(f.lease.frame(f.grant.capability, SCOPE, request().signal), refused(condition === "authority" ? "unauthorized" : "failed"));
     await until(() => f.driver.closed === 1); assert.equal(f.driver.inputs.length, 0);
   });
+});
+
+
+test("host fixture selection reaches the owned opener and cannot be changed by a same-scope restart", async t => {
+  const opened: unknown[] = [];
+  const f = await fixture(t, { open: async (...args) => { opened.push(args[1]); return new Driver(); } });
+  await f.lease.start(f.grant.capability, SCOPE, request().signal, f.retain, "host");
+  assert.deepEqual(opened, ["host"]);
+  await assert.rejects(f.lease.start(f.grant.capability, SCOPE, request().signal, f.retain, "remote"), FixtureLeaseError);
+  assert.equal(opened.length, 1);
+});
+
+test("host fixture denies screenshots and remote input while preserving authorized handback", async t => {
+  for (const action of ["frame", "input"] as const) await t.test(action, async t => {
+    const f = await fixture(t);
+    await f.lease.start(f.grant.capability, SCOPE, request().signal, f.retain, "host");
+    await assert.rejects(action === "frame" ? f.lease.frame(f.grant.capability, SCOPE, request().signal)
+      : f.lease.input(f.grant.capability, SCOPE, INPUT, request().signal, randomUUID(), FRAME_REF), FixtureLeaseError);
+    assert.equal(f.driver.frames, 0); assert.equal(f.driver.inputs.length, 0); assert.equal(f.driver.closed, 0);
+    f.driver.verified = true;
+    assert.equal(await f.lease.verify(f.grant.capability, SCOPE, request().signal), true);
+    await f.lease.close(f.grant.capability, SCOPE, request().signal);
+    assert.equal(f.driver.closed, 1); assert.equal(f.retained(), 0);
+  });
+});
+
+
+test("the fixture receipt mode query requires current owned proof and cannot survive closure", async t => {
+  const f = await fixture(t);
+  await f.lease.start(f.grant.capability, SCOPE, request().signal, f.retain, "host");
+  await assert.rejects(f.lease.controlMode("wrong-proof", SCOPE, request().signal), FixtureLeaseError);
+  await assert.rejects(f.lease.controlMode(f.grant.capability, { ...SCOPE, generation: 2 }, request().signal), FixtureLeaseError);
+  assert.equal(await f.lease.controlMode(f.grant.capability, SCOPE, request().signal), "host");
+  assert.equal(f.driver.frames, 0); assert.equal(f.driver.inputs.length, 0); assert.equal(f.driver.verifications, 0);
+  await f.lease.close(f.grant.capability, SCOPE, request().signal);
+  await assert.rejects(f.lease.controlMode(f.grant.capability, SCOPE, request().signal), FixtureLeaseError);
 });

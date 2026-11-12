@@ -1,6 +1,6 @@
 ---
 name: remote-login
-description: Use the Remote Login plugin for owner-approved mobile-to-host pairing, separately gated OCI CLI and Console login, and bounded read tasks through a verified session.
+description: Use the Remote Login plugin for owner-approved remote or host-desktop login, separately gated OCI CLI and Console authorization, and bounded read tasks through a verified session.
 ---
 
 Use the explicit selected enrolled host:
@@ -11,7 +11,9 @@ Use the explicit selected enrolled host:
 - `bb remote-login provisioning-info <host-id> --json`: fixed owner provisioning location and status, never initialization.
 - `bb remote-login probe-oci <host-id> --json`: fixed public source inventory only; a match does not authenticate an account.
 
-Read docs/control-pairing.md before owner setup. The phone generates its control key locally. Obtain only the public 64-hex fingerprint in chat. Deliver the private key only through the BB secrets skill to this attempt's fresh private staging file. Never inspect that file, request keys in chat, return bearer grants through agent tools, or put key/token material into metadata, logs or realtime.
+Read docs/control-pairing.md before owner setup. The owner's BB client generates its control key locally. Obtain only the public 64-hex fingerprint in chat. Deliver the private key only through the BB secrets skill to this attempt's fresh private staging file. Never inspect that file, request keys in chat, return bearer grants through agent tools, or put key/token material into metadata, logs or realtime.
+
+Read docs/host-login.md when choosing how the person will operate the browser. Let the protected controller explicitly select remote takeover or a visible browser on the target host. Command execution location, user agent, IP address and localhost do not prove the person's client location or authorize control. Both choices require the same owner key and a synthetic control receipt matching that chosen mode. Host mode uses a fresh plugin-owned window, refuses remote frames/input and fences page input before handback verification. Do not attach a personal profile or bypass pairing because the person is using the host desktop. OCI configuration fixes the mode before startup; reopening the controller restores it. Cancel and request a new attempt to change a fixed choice.
 
 The standalone provisioning script is a trusted owner operation, not an agent/native/RPC capability. It must verify the independently approved fingerprint and may only create a missing root. Do not reset existing credentials or clear stale state speculatively.
 

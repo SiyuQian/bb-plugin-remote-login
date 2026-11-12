@@ -644,7 +644,7 @@ test("OCI requires accepted phone control before sending a private target or sta
   assert.equal(calls.filter((call) => call.action === "oci-target").length, 0);
   assert.equal(calls.filter((call) => call.action === "start").length, 0);
   assert.equal(view.queryByRole("button", { name: "开始 OCI CLI 登录" }), null);
-  assert.match(view.container.textContent!, /手机控制验收/);
+  assert.match(view.container.textContent!, /当前控制方式验收/);
   assert.deepEqual(view.inspection.rpcCalls, []);
   accepted = true;
   await click(view, "检查 OCI 启动条件");
@@ -1013,4 +1013,66 @@ test("control authentication timeout releases the key form while the fetch remai
     assert.match(view.container.textContent!, /测试控制鉴权未通过/);
   } finally { await act(async () => { release(); }); }
   assert.equal(view.queryByRole("button", { name: "开始假页面测试" }), null);
+});
+
+test("explicit host mode stays fixed after key authentication and starts without remote browser requests", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const calls = loginHttp(t);
+  const view = renderControl(t);
+  await act(async () => {});
+  fireEvent.click(view.getByRole("radio", { name: "在 host 上直接登录" }));
+  await authenticate(view);
+  assert.equal((view.getByRole("radio", { name: "远程接管" }) as HTMLInputElement).disabled, true);
+  await click(view, "开始假页面测试");
+  await act(async () => { t.mock.timers.tick(2000); });
+  assert.deepEqual(calls.find(call => call.action === "start")!.body, { attemptId: "attempt-a", controlMode: "host" });
+  assert.equal(calls.filter(call => call.action === "frame" || call.action === "input").length, 0);
+  assert.equal(view.queryByLabelText("测试文字"), null);
+  await click(view, "交还并核验测试结果");
+});
+
+test("host OCI mode accompanies private preflight and target configuration", async t => {
+  const calls = ociHttp(t);
+  const view = renderControl(t);
+  await act(async () => {});
+  fireEvent.click(view.getByRole("radio", { name: "在 host 上直接登录" }));
+  await authenticateOci(view); await selectOciTarget(view);
+  assert.deepEqual(calls.find(call => call.action === "oci-status")!.body, { attemptId: "attempt-a", controlMode: "host" });
+  assert.deepEqual(calls.find(call => call.action === "oci-target")!.body, { attemptId: "attempt-a", controlMode: "host", expected: expectedOci });
+});
+
+test("a returning host Console controller keeps its stored mode and only polls verification", async t => {
+  const calls = ociHttp(t, { mode: "oci_web", intercept: call => {
+    const record = { ...attempt(String(call.body.attemptId)), mode: "oci_web", controlMode: "host", phase: "verifying", principalId: "principal-a" };
+    if (call.action === "status") return response(record);
+    if (call.action === "session") return response({ grant: { capability, expiresAt: Date.now() + 300_000 }, attempt: record });
+    if (call.action === "console-status") return response({ configured: true, phoneControlAccepted: true, phase: "verifying", failure: null });
+    if (call.action === "handback") return response({ verified: true });
+  } });
+  let completions = 0;
+  const view = renderControl(t, { attemptId: "attempt-a", onComplete: async () => { completions++; } });
+  await authenticateOci(view);
+  assert.equal((view.getByRole("radio", { name: "在 host 上直接登录" }) as HTMLInputElement).checked, true);
+  assert.equal((view.getByRole("radio", { name: "远程接管" }) as HTMLInputElement).disabled, true);
+  assert.deepEqual(calls.find(call => call.action === "console-status")!.body, { attemptId: "attempt-a", controlMode: "host" });
+  assert.equal(view.queryByLabelText("OCI 登录文字（仅发送到私有浏览器）"), null);
+  await click(view, "交还并授权只读");
+  assert.equal(completions, 1);
+  assert.equal(calls.filter(call => ["start", "frame", "input", "close", "console-target"].includes(call.action)).length, 0);
+});
+
+test("reopening a configured host target before start restores the local choice without remote reads", async t => {
+  const calls = ociHttp(t, { mode: "oci_web", intercept: call => {
+    const record = { ...attempt(String(call.body.attemptId)), mode: "oci_web", controlMode: "host", phase: "awaiting_control", principalId: "principal-a" };
+    if (call.action === "status") return response(record);
+    if (call.action === "session") return response({ grant: { capability, expiresAt: Date.now() + 300_000 }, attempt: record });
+    if (call.action === "console-status") return response({ configured: true, phoneControlAccepted: true, phase: "ready", failure: null });
+  } });
+  const view = renderControl(t);
+  await authenticateOci(view);
+  assert.equal((view.getByRole("radio", { name: "在 host 上直接登录" }) as HTMLInputElement).checked, true);
+  assert.equal((view.getByRole("radio", { name: "远程接管" }) as HTMLInputElement).disabled, true);
+  await click(view, "开始 OCI Console 登录");
+  assert.deepEqual(calls.find(call => call.action === "start")!.body, { attemptId: "attempt-a", controlMode: "host" });
+  assert.equal(calls.filter(call => call.action === "frame" || call.action === "input" || call.action === "console-target").length, 0);
 });

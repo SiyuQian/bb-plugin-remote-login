@@ -22,7 +22,7 @@ const signal = () => new AbortController().signal;
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((value) => { resolve = value; }); return { promise, resolve }; }
 async function eventually(condition: () => Promise<boolean>) { for (let index = 0; index < 400; index++) { if (await condition()) return; await delay(5); } assert.fail("Console job did not reach the expected state"); }
 
-async function setup(t: TestContext, options: { phone?: boolean; holdOpen?: boolean; holdFrame?: boolean; holdVerify?: boolean; holdRead?: boolean; ignoreReadAbort?: boolean; closeFailure?: boolean; mismatch?: boolean; lifetimeMs?: number; outline?: { title: string; headings: string[] } } = {}) {
+async function setup(t: TestContext, options: { acceptedMode?: "remote" | "host"; phone?: boolean; holdOpen?: boolean; holdFrame?: boolean; holdVerify?: boolean; holdRead?: boolean; ignoreReadAbort?: boolean; closeFailure?: boolean; mismatch?: boolean; lifetimeMs?: number; outline?: { title: string; headings: string[] } } = {}) {
   const api = await import("../oci-console-host-job.ts").catch(() => null);
   assert.ok(api, "Console host lifecycle implementation must exist");
   const dataDir = await fs.mkdtemp(join(await fs.realpath(tmpdir()), "console-host-job-")); await fs.chmod(dataDir, 0o700);
@@ -65,7 +65,7 @@ async function setup(t: TestContext, options: { phone?: boolean; holdOpen?: bool
       if (capabilityValue !== capability || JSON.stringify(supplied) !== JSON.stringify(scope)) throw new Error("refused");
       return expiry;
     },
-    requirePhoneGate: async () => { if (options.phone === false) throw new Error("unproven phone"); },
+    requirePhoneGate: async (mode) => { if (options.phone === false || (options.acceptedMode && mode !== options.acceptedMode)) throw new Error("unproven phone"); },
     dependencies: { openBrowser: async (input) => { launches++; captured = input; await input.assertOwned(scope, input.lifecycle); if (options.holdOpen) await opening.promise; return browser; } },
   });
   t.after(async () => { opening.resolve(); framing.resolve(); verifying.resolve(); reading.resolve(); authorizationHold?.released.resolve(); await jobs.dispose().catch(() => {}); await fs.rm(dataDir, { recursive: true, force: true }); });
@@ -313,4 +313,29 @@ test("capture change Console read still closes on post-authorization loss or spo
     await assert.rejects(s.jobs.frame(capA, s.scope, signal()), error => error instanceof s.ConsoleHostJobError && error.code !== "stale_frame");
     await eventually(async () => s.facts.closed); assert.equal(s.facts.inputs, 0);
   });
+});
+
+
+test("host Console pins its selected gate and visible opener then retains the verified native browser", async t => {
+  const s = await setup(t, { acceptedMode: "host" });
+  assert.equal((await s.jobs.status(capA, s.scope, signal(), "host")).phoneControlAccepted, true);
+  assert.equal((await s.jobs.status(capA, s.scope, signal(), "remote")).phoneControlAccepted, false);
+  await s.jobs.configure(capA, s.scope, target, signal(), "host");
+  await assert.rejects(s.jobs.configure(capA, s.scope, target, signal(), "remote"), s.ConsoleHostJobError);
+  await assert.rejects(s.jobs.start(capA, s.scope, signal(), s.retain, "remote"), s.ConsoleHostJobError);
+  await s.jobs.start(capA, s.scope, signal(), s.retain, "host");
+  await eventually(async () => (await s.jobs.status(capA, s.scope, signal(), "host")).phase === "user_control");
+  assert.equal(s.facts.captured!.controlMode, "host");
+  for (const action of ["frame", "input"] as const) {
+    await assert.rejects(action === "frame" ? s.jobs.frame(capA, s.scope, signal())
+      : s.jobs.input(capA, s.scope, { type: "key", key: "Enter" }, signal(), randomUUID(), FRAME_REF), s.ConsoleHostJobError);
+  }
+  assert.equal(s.facts.inputs, 0); assert.equal(s.facts.closed, false);
+  await s.jobs.handback(capA, s.scope, signal());
+  await eventually(async () => (await s.jobs.status(capA, s.scope, signal(), "host")).phase === "verified");
+  const done = await s.jobs.handback(capA, s.scope, signal());
+  assert.equal(done.verified, true); assert.equal(s.facts.closed, false);
+  await s.jobs.resumeProof(s.scope, done.receipt!);
+  const page = await s.jobs.readTask({ scope: s.scope, receipt: done.receipt!, browserRef: done.browserRef! }, { operation: "read_page" }, signal());
+  assert.equal(page.result.operation, "read_page");
 });

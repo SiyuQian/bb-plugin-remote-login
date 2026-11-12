@@ -8,7 +8,7 @@
   },
   "bb": {
     "name": "Remote Login [Experimental]",
-    "description": "Pair a phone with an enrolled host and validate protected remote-login control sessions.",
+    "description": "Owner-controlled remote takeover or direct host-desktop login with protected handback.",
     "branding": {
       "icon": "KeyRound"
     },

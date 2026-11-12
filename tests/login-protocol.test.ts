@@ -10,6 +10,16 @@ const INITIAL: LoginAttempt = {
   verification: null, resume: { state: "none", deliveryId: null }, failure: null,
 };
 
+test("host presentation is persisted at start and cannot be changed by a later event", () => {
+  const paired = reduceAttempt(INITIAL, event(INITIAL, "paired", { principalId: "principal-fixture" }), 1_001);
+  const started = reduceAttempt(paired, event(paired, "start", { controlMode: "host" }), 1_002);
+  assert.equal((started as any).controlMode, "host");
+  const ready = reduceAttempt(started, event(started, "ready"), 1_003);
+  assert.equal((ready as any).controlMode, "host");
+  assert.throws(() => reduceAttempt(ready, event(ready, "handback", { controlMode: "remote" }), 1_004), refused("invalid_event"));
+  assert.equal(loginAttemptSchema.safeParse({ ...INITIAL, controlMode: "automatic" }).success, false);
+});
+
 function event(attempt: LoginAttempt, type: AttemptEvent["type"], fields: Record<string, unknown> = {}): AttemptEvent {
   const { attemptId, projectId, threadId, environmentId, hostId, browserContextId, generation, principalId } = attempt;
   return { expected: { attemptId, projectId, threadId, environmentId, hostId, browserContextId, generation, principalId }, expectedRevision: attempt.revision, type, ...fields } as AttemptEvent;

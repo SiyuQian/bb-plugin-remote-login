@@ -70,7 +70,7 @@ export function PairingPage() {
       ]);
       operation.signal.throwIfAborted(); if (!operation.current()) return;
       setConfigured(status.provisioned); setChannel(connected);
-      setMessage(connected ? "手机控制通道可连接，尚未授予浏览器控制权。" : "当前客户端的控制通道尚未确认，请保持 BB 登录后重试。");
+      setMessage(connected ? "控制通道可连接，尚未授予浏览器控制权。" : "当前客户端的控制通道尚未确认，请保持 BB 登录后重试。");
     } catch { if (operation.current()) setMessage("无法检查该 host 的配对状态。"); }
     finally { operation.finish(); }
   };
@@ -127,7 +127,7 @@ export function PairingPage() {
   const activeGrant = authorized ? grant.current : null;
   return <main className="h-full overflow-y-auto p-4">
     <div className="mx-auto max-w-2xl space-y-5">
-      <h1 className="text-lg font-semibold">手机配对</h1>
+      <h1 className="text-lg font-semibold">控制配对</h1>
       <p className="text-sm text-muted-foreground">为指定 host 设置独立控制密钥。它与 OCI 密码无关。</p>
       <label className="block space-y-2 text-sm">目标 host
         <select className="w-full rounded-md border border-input bg-background px-3 py-2" value={hostId} disabled={pending || authorized} onChange={(event) => setHostId(event.target.value)}>
@@ -141,8 +141,8 @@ export function PairingPage() {
       </div>
       {configured === false ? <section className="space-y-3 rounded-lg border border-border p-4">
         <h2 className="font-medium">首次配对</h2>
-        <p className="text-sm text-muted-foreground">密钥只在这台手机生成。请先保存到手机密码管理器，再把配对指纹发给我；密钥只填写到后续安全表单，由 owner 在 host 上核对后启用。</p>
-        <Button disabled={pending || !channel || generated !== null} onClick={() => void generate()}>生成手机控制密钥</Button>
+        <p className="text-sm text-muted-foreground">密钥只在当前客户端生成。请先保存到密码管理器，再把配对指纹发给我；密钥只填写到后续安全表单，由 owner 在 host 上核对后启用。</p>
+        <Button disabled={pending || !channel || generated !== null} onClick={() => void generate()}>生成控制密钥</Button>
         {generated ? <div className="space-y-3">
           <label className="block space-y-1 text-sm">控制密钥（请勿发送到聊天）<Input type="password" readOnly autoComplete="off" value={generated.key} /></label>
           <Button variant="outline" onClick={() => void copy(generated.key)}>复制密钥以安全保存</Button>

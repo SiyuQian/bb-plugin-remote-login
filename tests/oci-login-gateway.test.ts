@@ -57,7 +57,7 @@ async function system(t: TestContext, root: string | null = "root-oci-gateway") 
     assert.equal(target, hostId, "stored jobs must never select a replacement host");
     calls.push({ method, input, hostId: target });
     await state.before(method, input);
-    if (method === "inspectLoginCapabilities") return assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: true, cliSourceMatched: true });
+    if (method === "inspectLoginCapabilities") return assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: true, cliSourceMatched: true });
     if (method === "controlInfo") return { provisioned: state.root !== null, rootId: state.root, provisioningDirectory: "/private/oci-gateway-root" };
     if (method === "authenticateControl") {
       assert.equal((input as { key: string }).key, key);

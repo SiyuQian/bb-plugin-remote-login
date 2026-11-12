@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { ControlGrant, ControlScope } from "./control-authority.ts";
+import type { BrowserControlMode } from "./browser-control.ts";
 import type { FixtureFrame, FixtureInput } from "./fixture-wire.ts";
 import { postFixture } from "./fixture-client.ts";
 import { withAbort } from "./private-response.ts";
@@ -13,6 +14,7 @@ export type FixtureControlsProps = {
   scope: ControlScope;
   capability: string;
   mode?: "synthetic" | "oci_cli" | "oci_web";
+  controlMode?: BrowserControlMode;
   startDisabled?: boolean;
   initialVerifying?: boolean;
   handbackLabel?: string;
@@ -70,7 +72,7 @@ async function closeAfterPending(session: Session): Promise<void> {
   return session.closing;
 }
 
-export function FixtureControls({ origin, hostId, scope, capability, mode = "synthetic", startDisabled = false, initialVerifying = false, handbackLabel, transport, onRenewed, onVerified, onStopped, onFailure }: FixtureControlsProps) {
+export function FixtureControls({ origin, hostId, scope, capability, mode = "synthetic", controlMode = "remote", startDisabled = false, initialVerifying = false, handbackLabel, transport, onRenewed, onVerified, onStopped, onFailure }: FixtureControlsProps) {
   const renewed = useRef(onRenewed); renewed.current = onRenewed;
   const failure = useRef(onFailure);
   failure.current = onFailure;
@@ -86,7 +88,7 @@ export function FixtureControls({ origin, hostId, scope, capability, mode = "syn
       close: (signal) => postFixture(origin, "close", { hostId, scope: { ...scope } }, capability, signal),
     }, live: true, started: mode === "oci_web" && initialVerifying, starting: false, opened: mode === "oci_web" && initialVerifying, finished: false, verifying: mode === "oci_web" && initialVerifying,
     busy: false, closingRequest: false, handbackRequest: false, retained: mode === "oci_web" && initialVerifying, controller: null, pending: null, cleanupObservation: null, closing: null,
-  }), [origin, hostId, transport ? null : capability, scope.threadId, scope.attemptId, scope.browserContextId, scope.generation, transport, mode, initialVerifying]);
+  }), [origin, hostId, transport ? null : capability, scope.threadId, scope.attemptId, scope.browserContextId, scope.generation, transport, mode, controlMode, initialVerifying]);
   const [view, setView] = useState(() => initialView(session));
   // A supplied transport owns proof rotation; its stable identity preserves the live viewer.
   const shown = view.session === session ? view : initialView(session);
@@ -95,7 +97,7 @@ export function FixtureControls({ origin, hostId, scope, capability, mode = "syn
   };
   const run = (action: "start" | "ready" | "frame" | "input" | "close" | "handback" | "renew", event?: FixtureInput): void => {
     const inputFrameRef = action === "input" ? shown.frame?.frameRef : undefined;
-    if (action === "input" && !inputFrameRef) return;
+    if ((controlMode === "host" && (action === "frame" || action === "input")) || (action === "input" && !inputFrameRef)) return;
     if (!session.live || session.busy || (action === "start" && startDisabled) || (action !== "start" && action !== "ready" && action !== "close" && action !== "renew" && !session.started)
       || (session.verifying && action !== "handback" && action !== "close" && action !== "renew")
       || (action === "close" && !session.opened && (!session.transport.handback || session.finished))
@@ -174,6 +176,7 @@ export function FixtureControls({ origin, hostId, scope, capability, mode = "syn
         if (action === "input") {
           await withAbort(session.transport.input(event!, controller.signal, inputFrameRef!), controller.signal);
         }
+        if (controlMode === "host") return;
         readingFrame = true;
         const frame = await withAbort(session.transport.frame(controller.signal), controller.signal);
         if (session.live && !controller.signal.aborted && session.started) update((current) => ({ ...current, frame }));
@@ -213,7 +216,7 @@ export function FixtureControls({ origin, hostId, scope, capability, mode = "syn
     const poll = setInterval(() => {
       if (session.live && !session.busy && !document.hidden) {
         if (session.starting) run("ready");
-        else if (session.started) run(session.verifying ? "handback" : "frame");
+        else if (session.started && (session.verifying || controlMode === "remote")) run(session.verifying ? "handback" : "frame");
       }
     }, 1000);
     return () => {
@@ -236,18 +239,20 @@ export function FixtureControls({ origin, hostId, scope, capability, mode = "syn
   const oci = mode === "oci_cli" || mode === "oci_web";
   const provider = mode === "oci_web" ? "OCI Console" : "OCI CLI";
   return <section className="space-y-3 rounded-lg border border-border p-4" aria-label={oci ? "OCI 私有登录控制" : "假页面测试控制"}>
-    <p className="text-sm font-medium">{oci ? "仅在下方私有浏览器画面中操作 OCI 登录；文字只发送至该浏览器。" : "仅假页面测试，勿输入账号凭据"}</p>
+    {controlMode === "host" ? <p className="text-sm font-medium">请在目标 host（{hostId}）的插件专属浏览器窗口中直接操作。需要该 host 的图形桌面；完成后回到这里交还并核验。</p> : <p className="text-sm font-medium">{oci ? "仅在下方私有浏览器画面中操作 OCI 登录；文字只发送至该浏览器。" : "仅假页面测试，勿输入账号凭据"}</p>}
+    {controlMode === "host" && !oci ? <p className="text-sm">仅假页面测试，勿输入账号凭据。</p> : null}
     <div className="flex flex-wrap gap-2">
       <Button type="button" disabled={startDisabled || shown.started || shown.starting || shown.pending || shown.error || shown.finished} onClick={() => run("start")}>{oci ? `开始 ${provider} 登录` : "开始假页面测试"}</Button>
       <Button type="button" variant="outline" disabled={(!shown.started && !shown.starting && !session.transport.handback) || shown.pending || shown.finished || shown.error} onClick={() => run("close")}>{oci ? `停止 ${provider} 登录` : "停止假页面测试"}</Button>
       {session.transport.renew ? <Button type="button" variant="outline" disabled={shown.pending || shown.finished || shown.error} onClick={() => run("renew")}>{oci ? "延长 OCI 控制授权" : "延长测试控制授权"}</Button> : null}
       {session.transport.handback ? <Button type="button" disabled={!shown.started || shown.pending || shown.error} onClick={() => run("handback")}>{handbackLabel ?? (oci ? "交还并核验 OCI CLI 登录" : "交还并核验测试结果")}</Button> : null}
-      {shown.started && !shown.frame && !shown.error && !shown.verifying ? <Button type="button" variant="outline" disabled={shown.pending} onClick={() => run("frame")}>刷新私有浏览器画面</Button> : null}
+      {controlMode === "remote" && shown.started && !shown.frame && !shown.error && !shown.verifying ? <Button type="button" variant="outline" disabled={shown.pending} onClick={() => run("frame")}>刷新私有浏览器画面</Button> : null}
     </div>
-    {shown.frame ? <img src={`data:image/png;base64,${shown.frame.png}`} alt={oci ? "OCI 私有登录画面" : "假页面测试画面"} width={800} height={600}
+    {controlMode === "remote" && shown.frame ? <img src={`data:image/png;base64,${shown.frame.png}`} alt={oci ? "OCI 私有登录画面" : "假页面测试画面"} width={800} height={600}
       role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled} draggable={false}
       onClick={tap} onKeyDown={(event) => { if (event.key === "Enter" && !disabled) { event.preventDefault(); run("input", { type: "key", key: "Enter" }); } }}
       style={{ width: "100%", maxWidth: 800, height: "auto", touchAction: "manipulation" }} /> : null}
+    {controlMode === "remote" ? <>
     <label className="block space-y-1 text-sm">{oci ? "OCI 登录文字（仅发送到私有浏览器）" : "测试文字"}<Input type={oci ? "password" : "text"} autoComplete="off" value={shown.text} maxLength={256} disabled={textDisabled}
       onChange={(event) => update((current) => ({ ...current, text: event.target.value }))}
       onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} /></label>
@@ -257,6 +262,7 @@ export function FixtureControls({ origin, hostId, scope, capability, mode = "syn
       <Button type="button" variant="outline" disabled={disabled} onClick={() => run("input", { type: "wheel", deltaY: -300 })}>向上滚动</Button>
       <Button type="button" variant="outline" disabled={disabled} onClick={() => run("input", { type: "wheel", deltaY: 300 })}>向下滚动</Button>
     </div>
+    </> : null}
     {shown.stale ? <p role="status" aria-live="polite">画面已更新，本次输入未发送。请查看新画面后重新操作。</p> : null}
     {shown.changed ? <p role="status" aria-live="polite">画面读取时发生变化。请查看新画面后继续操作。</p> : null}
     {shown.handbackError ? <p role="status" aria-live="polite">{oci ? "OCI CLI 尚未核验成功。请完成私有浏览器登录，等待 CLI 回调后重试。" : "核验未通过，请完成假页面测试后重试。"}</p> : null}

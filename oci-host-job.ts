@@ -1,3 +1,4 @@
+import { browserControlModeSchema, type BrowserControlMode } from "./browser-control.ts";
 import { randomUUID } from "node:crypto";
 import type { ControlGrant, ControlScope } from "./control-authority.ts";
 import { controlScopeSchema } from "./control-wire.ts";
@@ -30,7 +31,7 @@ type Options = {
   dataDir: string;
   lifecycle: AbortSignal;
   authorize(capability: string, scope: ControlScope): Promise<number>;
-  requirePhoneGate(): Promise<void>;
+  requirePhoneGate(controlMode: BrowserControlMode): Promise<void>;
   now?: () => number;
   // Worker-only external process/service boundaries, never accepted by RPC.
   dependencies?: Partial<Dependencies>;
@@ -42,7 +43,7 @@ export class OciHostJobError extends Error {
 }
 type Handback = OciHostStatus & { verified: boolean; receipt?: string; accountRef?: string };
 type Run = {
-  key: string; scope: ControlScope; capability: string; expected: CliExpectedIdentity;
+  key: string; scope: ControlScope; controlMode: BrowserControlMode; capability: string; expected: CliExpectedIdentity;
   expiresAt: number; hardDeadline: number; controller: AbortController; retained: Retention;
   phase: OciHostStatus["phase"]; failure: OciHostStatus["failure"];
   starting: Promise<void>; child?: Awaited<ReturnType<typeof startOciAuthenticationChild>>;
@@ -83,7 +84,7 @@ async function race<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 export class OciHostJobs {
   #options: Options;
   #dependencies: Dependencies;
-  #configured = new Map<string, CliExpectedIdentity>();
+  #configured = new Map<string, { expected: CliExpectedIdentity; controlMode: BrowserControlMode }>();
   #closedScopes = new Set<string>();
   #runs = new Map<string, Run>();
   #active?: Run;
@@ -114,15 +115,15 @@ export class OciHostJobs {
     if (this.#poisoned) fail("cleanup_uncertain");
     if (signal?.aborted) fail("aborted");
   }
-  async #phone(signal: AbortSignal): Promise<void> {
-    try { await race(Promise.resolve().then(this.#options.requirePhoneGate), AbortSignal.any([signal, this.#options.lifecycle, AbortSignal.timeout(8000)])); }
+  async #phone(signal: AbortSignal, controlMode: BrowserControlMode): Promise<void> {
+    try { await race(Promise.resolve().then(() => this.#options.requirePhoneGate(controlMode)), AbortSignal.any([signal, this.#options.lifecycle, AbortSignal.timeout(8000)])); }
     catch { fail("unsupported"); }
     this.#available(signal);
   }
-  async #authorize(capability: string, scope: ControlScope, signal: AbortSignal, phone = true): Promise<number> {
+  async #authorize(capability: string, scope: ControlScope, signal: AbortSignal, phone = true, controlMode = this.#configured.get(keyOf(scope))?.controlMode ?? "remote"): Promise<number> {
     this.#available(signal);
     const bounded = AbortSignal.any([signal, this.#options.lifecycle, AbortSignal.timeout(8000)]);
-    if (phone) await this.#phone(bounded);
+    if (phone) await this.#phone(bounded, controlMode);
     let expiresAt: number;
     try { expiresAt = await race(Promise.resolve().then(() => this.#options.authorize(capability, scope)), bounded); }
     catch { fail("authorization"); }
@@ -185,26 +186,31 @@ export class OciHostJobs {
     if (run.childRetentions) fail("cleanup_uncertain");
     await run.retained.dispose(); run.retainedReleased = true;
   }
-  async configure(capability: string, supplied: ControlScope, suppliedExpected: CliExpectedIdentity, signal: AbortSignal): Promise<void> {
-    const scope = scopeValue(supplied), key = keyOf(scope);
-    await this.#authorize(capability, scope, signal);
+  async configure(capability: string, supplied: ControlScope, suppliedExpected: CliExpectedIdentity, signal: AbortSignal, suppliedMode: BrowserControlMode = "remote"): Promise<void> {
+    const scope = scopeValue(supplied), key = keyOf(scope), mode = browserControlModeSchema.safeParse(suppliedMode);
+    if (!mode.success) fail("invalid_target");
+    const controlMode = mode.data;
+    await this.#authorize(capability, scope, signal, true, controlMode);
     if (this.#closedScopes.has(key)) fail("inactive");
     const parsed = cliExpectedIdentitySchema.safeParse(suppliedExpected);
     if (!parsed.success || parsed.data.region !== "ap-sydney-1"
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(scope.attemptId)) fail("invalid_target");
     const existing = this.#configured.get(key);
     if (existing) {
-      if (JSON.stringify(existing) !== JSON.stringify(parsed.data)) fail("invalid_target");
+      if (existing.controlMode !== controlMode || JSON.stringify(existing.expected) !== JSON.stringify(parsed.data)) fail("invalid_target");
       return;
     }
     if (this.#configured.size >= 256) fail("busy");
-    this.#configured.set(key, Object.freeze(parsed.data));
+    this.#configured.set(key, Object.freeze({ expected: Object.freeze(parsed.data), controlMode }));
   }
-  async start(capability: string, supplied: ControlScope, signal: AbortSignal, retain: () => Retention): Promise<typeof viewport> {
-    const scope = scopeValue(supplied), key = keyOf(scope);
-    const expiresAt = await this.#authorize(capability, scope, signal);
-    const expected = this.#configured.get(key);
-    if (!expected) fail("invalid_target");
+  async start(capability: string, supplied: ControlScope, signal: AbortSignal, retain: () => Retention, suppliedMode: BrowserControlMode = "remote"): Promise<typeof viewport> {
+    const scope = scopeValue(supplied), key = keyOf(scope), mode = browserControlModeSchema.safeParse(suppliedMode);
+    if (!mode.success) fail("invalid_target");
+    const controlMode = mode.data;
+    const expiresAt = await this.#authorize(capability, scope, signal, true, controlMode);
+    const configured = this.#configured.get(key);
+    if (!configured || configured.controlMode !== controlMode) fail("invalid_target");
+    const expected = configured.expected;
     if (this.#closedScopes.has(key)) fail("inactive");
     const prior = this.#runs.get(key);
     if (prior) {
@@ -220,7 +226,7 @@ export class OciHostJobs {
       try { await retained.dispose(); } catch { this.#poisoned = true; fail("cleanup_uncertain"); }
       throw error;
     }
-    const run: Run = { key, scope, expected, capability, expiresAt, hardDeadline: this.#time() + 900000,
+    const run: Run = { key, scope, controlMode, expected, capability, expiresAt, hardDeadline: this.#time() + 900000,
       controller: new AbortController(), retained, phase: "starting", failure: null,
       starting: Promise.resolve(), busy: false, proofRevision: 0, stopped: false, uncertain: false,
       retainedReleased: false, childRetentions: 0, inputIds: new InputReplayGuard() };
@@ -241,7 +247,7 @@ export class OciHostJobs {
         authorize: () => this.#authorizeRun(run), retainWorker: () => this.#retainChild(run),
         consumeBrowser: async (url, childSignal) => {
           childSignal.throwIfAborted(); await this.#authorizeRun(run);
-          run.browserOpening = Promise.resolve().then(() => this.#dependencies.openBrowser(this.#options.dataDir, url, run.controller.signal, run.session));
+          run.browserOpening = Promise.resolve().then(() => this.#dependencies.openBrowser(this.#options.dataDir, url, run.controller.signal, run.session, run.controlMode));
           try { run.browser = await run.browserOpening; }
           catch (error) {
             // The child reports only browser_refused; preserve browser ownership uncertainty here.
@@ -267,10 +273,12 @@ export class OciHostJobs {
   #public(run: Run | undefined, configured: boolean, phoneControlAccepted: boolean): OciHostStatus {
     return { configured, phoneControlAccepted, phase: run?.phase ?? (configured ? "ready" : "unconfigured"), failure: run?.failure ?? null };
   }
-  async status(capability: string, supplied: ControlScope, signal: AbortSignal): Promise<OciHostStatus> {
-    const scope = scopeValue(supplied), key = keyOf(scope);
+  async status(capability: string, supplied: ControlScope, signal: AbortSignal, suppliedMode?: BrowserControlMode): Promise<OciHostStatus> {
+    const scope = scopeValue(supplied), key = keyOf(scope), configured = this.#configured.get(key);
     await this.#authorize(capability, scope, signal, false);
-    let accepted = true; try { await this.#phone(signal); } catch { accepted = false; }
+    const mode = browserControlModeSchema.safeParse(suppliedMode ?? configured?.controlMode ?? "remote");
+    if (!mode.success || (configured && mode.data !== configured.controlMode)) fail("invalid_target");
+    let accepted = true; try { await this.#phone(signal, mode.data); } catch { accepted = false; }
     const run = this.#runs.get(key);
     if (run && !run.stopped && run.phase !== "verified") this.#assertLive(run);
     if (!run && this.#closedScopes.has(key)) return { configured: true, phoneControlAccepted: accepted, phase: "cancelled", failure: "cancelled" };
@@ -282,6 +290,7 @@ export class OciHostJobs {
     const run = this.#runs.get(keyOf(scope));
     if (!run) fail("inactive");
     this.#refresh(run, capability, expiry);
+    if (run.controlMode !== "remote") fail("inactive");
     if (run.phase === "starting" || run.busy) fail("busy");
     if (run.phase !== "user_control" || !run.browser) fail("inactive");
     run.busy = true;
@@ -341,6 +350,13 @@ export class OciHostJobs {
     return { ...this.#public(run, true, true), verified: false };
   }
   async #verify(run: Run): Promise<void> {
+    if (run.controlMode === "host") {
+      const block = run.browser?.blockLocalInput;
+      if (typeof block !== "function") fail("unsupported");
+      // A visible browser must stop accepting local input before waiting for
+      // the callback. Phase fencing alone protects only the remote API.
+      await race(block.call(run.browser), AbortSignal.any([run.controller.signal, this.#options.lifecycle, AbortSignal.timeout(7500)]));
+    }
     await this.#authorizeRun(run);
     const result = await race(run.child!.result, run.controller.signal);
     if (result.outcome !== "bootstrap_complete") fail("child_failed");

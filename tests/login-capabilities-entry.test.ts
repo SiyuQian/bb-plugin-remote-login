@@ -4,7 +4,7 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import plugin from "../server.ts";
 import { assessLoginCapabilities } from "../provider-registry.ts";
 
-const report = assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: false, cliSourceMatched: true });
+const report = assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: false, cliSourceMatched: true });
 test("method diagnostics route to the explicit host and expose limitations without authorization", async t => {
   const { bb, harness } = createFakePluginHost({ pluginId: "remote-login", experimental_callHostRpc: async call => {
     assert.equal(call.hostId, "host-selected"); assert.equal(call.method, "inspectLoginCapabilities"); assert.equal(call.input, null); return report;

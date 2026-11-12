@@ -7,6 +7,7 @@ import puppeteer, { type Browser, type BrowserContext, type CDPSession, type HTT
 import { fixtureInputSchema, type FixtureFrame, type FixtureInput } from "./fixture-wire.ts";
 import { FrameObservation } from "./frame-observation.ts";
 import { StaleFrameError } from "./frame-error.ts";
+import { browserControlModeSchema, type BrowserControlMode } from "./browser-control.ts";
 import { controlScopeSchema } from "./control-wire.ts";
 import type { ControlScope } from "./control-authority.ts";
 import { consoleExpectedIdentitySchema, type ConsoleExpectedIdentity } from "./oci-console-protocol.ts";
@@ -16,7 +17,7 @@ import { inspectOwnedProcess } from "./owned-process-identity.ts";
 import { OwnedResourceLedger, type OwnedResource, type OwnedResourceWriter } from "./owned-resource-ledger.ts";
 
 const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const chromeVersion = "157.0.8103.50";
+const chromeVersion = "157.0.8103.51";
 const startUrl = "https://cloud.oracle.com/?region=ap-sydney-1";
 const oracleHosts = new Set(["cloud.oracle.com", "login.ap-sydney-1.oraclecloud.com", "signin.oracle.com"]);
 const networkAllowlist = ["about\\:blank", ...[...oracleHosts].map(host => `https://${host}/*`), "https://*.identity.oraclecloud.com/*"];
@@ -37,6 +38,7 @@ export interface ConsoleBrowser {
   close(): Promise<void>;
 }
 type Options = {
+  controlMode?: BrowserControlMode;
   tempDir: string; expected: ConsoleExpectedIdentity; scope: ControlScope; expiresAt: number; lifecycle: AbortSignal;
   assertOwned(scope: ControlScope, signal: AbortSignal): Promise<void>;
   /** Worker-private external boundaries. No public entry accepts launch/source overrides. */
@@ -65,6 +67,8 @@ async function exited(child: ChildProcess): Promise<void> {
 
 /** Fresh private Console context. No arbitrary navigation, DOM, script, URL or browser handles escape. */
 export async function openOciConsoleBrowser(input: Options): Promise<ConsoleBrowser> {
+  const controlMode = input.controlMode === undefined ? "remote" : input.controlMode;
+  if (!browserControlModeSchema.safeParse(controlMode).success) fail();
   let expected: ConsoleExpectedIdentity, scope: ControlScope;
   try { expected = Object.freeze(consoleExpectedIdentitySchema.parse(input.expected)); scope = Object.freeze(controlScopeSchema.parse(input.scope)); } catch { return fail(); }
   if (!Number.isSafeInteger(input.expiresAt) || input.expiresAt <= Date.now() || typeof input.assertOwned !== "function") fail();
@@ -134,7 +138,16 @@ export async function openOciConsoleBrowser(input: Options): Promise<ConsoleBrow
     observation.invalidate();
     const stoppedSignal = AbortSignal.any([signal, lifecycle, AbortSignal.timeout(7500)]), ticket = epoch;
     const result = slot.then(async () => {
-      try { await own(stoppedSignal); if (ticket !== epoch) fail(); await drain(stoppedSignal); const generation = documentGeneration; const value = await operation(stoppedSignal, generation); await own(stoppedSignal); if (generation !== documentGeneration || ticket !== epoch || phase !== "blocked") fail(); return value; }
+      try {
+        await own(stoppedSignal); if (ticket !== epoch) fail();
+        // Retained local pages keep renderer input disabled until exact closure.
+        if (controlMode === "host") await bounded(cdp!.send("Input.setIgnoreInputEvents", { ignore: true }), stoppedSignal);
+        await drain(stoppedSignal);
+        const generation = documentGeneration, value = await operation(stoppedSignal, generation);
+        await own(stoppedSignal);
+        if (generation !== documentGeneration || ticket !== epoch || phase !== "blocked") fail();
+        return value;
+      }
       catch { await close(); throw new ConsoleBrowserError(uncertain); }
       finally { busy = false; }
     });
@@ -151,7 +164,7 @@ export async function openOciConsoleBrowser(input: Options): Promise<ConsoleBrow
     writer = await ledger.beginWriter(resource, "browser"); await ledger.recordWriterDirectory(writer, path);
     if (lifecycle.aborted) fail();
     launchAttempted = true;
-    browser = await (input.dependencies?.launch ?? puppeteer.launch.bind(puppeteer))({ browser: "chrome", executablePath: chromePath, userDataDir: path, headless: true, pipe: true, dumpio: false, timeout: 10000, protocolTimeout: 3000, args: ["--no-proxy-server", "--disable-quic"], allowlist: networkAllowlist, logger: () => undefined });
+    browser = await (input.dependencies?.launch ?? puppeteer.launch.bind(puppeteer))({ browser: "chrome", executablePath: chromePath, userDataDir: path, headless: controlMode !== "host", pipe: true, dumpio: false, timeout: 10000, protocolTimeout: 3000, args: ["--no-proxy-server", "--disable-quic"], allowlist: networkAllowlist, logger: () => undefined });
     child = browser.process() ?? undefined;
     if (child) { processClosed = new Promise<void>(resolve => child!.once("close", () => resolve())); const identity = child.pid ? await inspectOwnedProcess(child.pid) : null; if (!identity) fail(true); await ledger.attachWriter(writer, identity); }
     if (!child || child.spawnargs[0] !== chromePath || !child.spawnargs.includes("--remote-debugging-pipe") || child.spawnargs.some(a => a.startsWith("--remote-debugging-port") || a.startsWith("--ignore-certificate-errors") || a === "--no-sandbox" || a === "--disable-setuid-sandbox") || !child.spawnargs.includes("--no-proxy-server") || !child.spawnargs.includes("--disable-quic") || child.spawnargs.filter(a => a.startsWith("--user-data-dir=")).length !== 1 || !child.spawnargs.includes(`--user-data-dir=${path}`) || await browser.version() !== `Chrome/${chromeVersion}`) fail();
@@ -216,6 +229,7 @@ export async function openOciConsoleBrowser(input: Options): Promise<ConsoleBrow
       },
     });
     await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: 6000 }); ready = true; live();
+    if (controlMode === "host") await page.bringToFront();
     const ownedPage = page, identityVerifier = verifier;
     const verified = async (signal: AbortSignal, generation: number) => { const match = await identityVerifier.verify(signal); live(); if (generation !== documentGeneration) fail(); const proof = await boundary.capture(signal); boundary.assert(proof); retained = { proof, document: generation }; return match; };
     const assertRetained = async (signal: AbortSignal) => { await own(signal); if (phase !== "blocked" || busy || !retained || retained.document !== documentGeneration) fail(); boundary.assert(retained.proof); await own(signal); if (!retained || retained.document !== documentGeneration) fail(); boundary.assert(retained.proof); };
@@ -228,6 +242,7 @@ export async function openOciConsoleBrowser(input: Options): Promise<ConsoleBrow
     };
     return {
       frame: async () => {
+        if (controlMode === "host") fail();
         const captured = await human(async () => {
           const ticket = observation.begin(), screenshot = await ownedPage.screenshot({ type: "png", fullPage: false });
           try {
@@ -244,6 +259,7 @@ export async function openOciConsoleBrowser(input: Options): Promise<ConsoleBrow
         return { ...captured.frame, frameRef };
       },
       input: async (event, frameRef, claimInput) => {
+        if (controlMode === "host") fail();
         let result;
         try {
           result = await human(async () => {

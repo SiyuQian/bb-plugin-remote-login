@@ -1,5 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { browserControlModeSchema } from "./browser-control.ts";
 import { controlScopeSchema, controlGrantSchema } from "./control-wire.ts";
 import { fixtureFrameSchema, fixtureInputSchema, frameRefSchema, inputIdSchema } from "./fixture-wire.ts";
 import { ociCompatibilityReportSchema } from "./oci-compatibility-wire.ts";
@@ -27,6 +28,7 @@ const refusal = z.object({ ok: z.literal(false), reason: z.string().max(80) }).s
 const checked = z.union([z.object({ ok: z.literal(true) }).strict(), refusal]);
 const granted = z.union([z.object({ ok: z.literal(true), grant: controlGrantSchema }).strict(), refusal]);
 const capabilityInput = z.object({ capability: z.string().max(200), scope: controlScopeSchema }).strict();
+const presentationInput = capabilityInput.extend({ controlMode: browserControlModeSchema.optional() }).strict();
 const deadline = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional();
 
 export const hostContract = defineRpcContract({
@@ -54,7 +56,7 @@ export const hostContract = defineRpcContract({
   renewControl: { input: capabilityInput.extend({ deadline }).strict(), output: granted },
   revokeControl: { input: capabilityInput, output: checked },
   startFixture: {
-    input: capabilityInput,
+    input: presentationInput,
     output: z.union([z.object({ ok: z.literal(true), viewport: z.object({ width: z.literal(800), height: z.literal(600) }).strict() }).strict(), refusal]),
   },
   frameFixture: {
@@ -69,9 +71,9 @@ export const hostContract = defineRpcContract({
     input: capabilityInput,
     output: z.union([z.object({ ok: z.literal(true), verified: z.boolean() }).strict(), refusal]),
   },
-  ociStatus: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), status: ociHostStatusSchema }).strict(), refusal]) },
-  configureOci: { input: capabilityInput.extend({ expected: cliExpectedIdentitySchema }).strict(), output: checked },
-  startOci: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), viewport: z.object({ width: z.literal(800), height: z.literal(600) }).strict() }).strict(), refusal]) },
+  ociStatus: { input: presentationInput, output: z.union([z.object({ ok: z.literal(true), status: ociHostStatusSchema }).strict(), refusal]) },
+  configureOci: { input: presentationInput.extend({ expected: cliExpectedIdentitySchema }).strict(), output: checked },
+  startOci: { input: presentationInput, output: z.union([z.object({ ok: z.literal(true), viewport: z.object({ width: z.literal(800), height: z.literal(600) }).strict() }).strict(), refusal]) },
   frameOci: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), frame: fixtureFrameSchema }).strict(), refusal]) },
   inputOci: { input: capabilityInput.extend({ inputId: inputIdSchema, frameRef: frameRefSchema, event: fixtureInputSchema }).strict(), output: checked },
   handbackOci: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), result: ociHandbackSchema }).strict(), refusal]) },
@@ -85,9 +87,9 @@ export const hostContract = defineRpcContract({
     input: z.object({ scope: controlScopeSchema, receipt: z.string().uuid(), accountRef: z.string().uuid(), request: ociReadRequestSchema }).strict(),
     output: z.union([z.object({ ok: z.literal(true), result: ociReadResultSchema, expiresAt: z.number().int().positive() }).strict(), refusal]),
   },
-  consoleStatus: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), status: ociHostStatusSchema }).strict(), refusal]) },
-  configureConsole: { input: capabilityInput.extend({ expected: consoleExpectedIdentitySchema }).strict(), output: checked },
-  startConsole: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), viewport: z.object({ width: z.literal(800), height: z.literal(600) }).strict() }).strict(), refusal]) },
+  consoleStatus: { input: presentationInput, output: z.union([z.object({ ok: z.literal(true), status: ociHostStatusSchema }).strict(), refusal]) },
+  configureConsole: { input: presentationInput.extend({ expected: consoleExpectedIdentitySchema }).strict(), output: checked },
+  startConsole: { input: presentationInput, output: z.union([z.object({ ok: z.literal(true), viewport: z.object({ width: z.literal(800), height: z.literal(600) }).strict() }).strict(), refusal]) },
   frameConsole: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), frame: fixtureFrameSchema }).strict(), refusal]) },
   inputConsole: { input: capabilityInput.extend({ inputId: inputIdSchema, frameRef: frameRefSchema, event: fixtureInputSchema }).strict(), output: checked },
   handbackConsole: { input: capabilityInput, output: z.union([z.object({ ok: z.literal(true), result: consoleHandbackSchema }).strict(), refusal]) },

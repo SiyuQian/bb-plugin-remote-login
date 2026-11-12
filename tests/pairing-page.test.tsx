@@ -102,7 +102,7 @@ test("an expired five-minute control grant releases the host and pairing control
 test("ordinary web clients use their current HTTPS origin for a credential-free preflight", async (t) => {
   const calls = controlHttp(t);
   const view = await renderPairing(t, { servers: null });
-  assert.ok(view.getByRole("heading", { name: "手机配对", level: 1 }));
+  assert.ok(view.getByRole("heading", { name: "控制配对", level: 1 }));
   assert.equal(calls.length, 0);
   assert.equal(view.queryByLabelText("控制密钥"), null);
   await checkConnection(view);
@@ -130,7 +130,7 @@ test("host discovery and unprovisioned pairing never submit a control key", asyn
   assert.equal(refresh.disabled, true);
   fireEvent.click(refresh);
   assert.equal(calls.length, 0);
-  assert.equal(view.queryByRole("button", { name: "生成手机控制密钥" }), null);
+  assert.equal(view.queryByRole("button", { name: "生成控制密钥" }), null);
   fireEvent.change(view.getByRole("combobox"), { target: { value: "fixture-host-b" } });
   await checkConnection(view);
   assert.ok(view.getByText("host 尚未配对"));
@@ -216,7 +216,7 @@ test("first pairing generates a local key and matching public fingerprint withou
   const calls = controlHttp(t);
   const view = await renderPairing(t, { provisioned: false });
   await checkConnection(view);
-  await act(async () => { fireEvent.click(view.getByRole("button", { name: "生成手机控制密钥" })); });
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "生成控制密钥" })); });
   const generated = await view.findByLabelText("控制密钥（请勿发送到聊天）") as HTMLInputElement;
   assert.match(generated.value, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(generated.type, "password");
@@ -254,7 +254,7 @@ test("pairing refresh timeout releases pending UI and preserves a generated key 
       ? new Promise(resolve => { release = () => resolve({ hostId: (input as { hostId: string }).hostId, provisioned: true, rootId: "late-root" }); })
       : { hostId: (input as { hostId: string }).hostId, provisioned: false, rootId: null } });
     await checkConnection(view);
-    await act(async () => { fireEvent.click(view.getByRole("button", { name: "生成手机控制密钥" })); });
+    await act(async () => { fireEvent.click(view.getByRole("button", { name: "生成控制密钥" })); });
     const generated = await view.findByLabelText("控制密钥（请勿发送到聊天）") as HTMLInputElement, saved = generated.value;
     hold = true; t.mock.timers.enable({ apis: ["setTimeout"] });
     await act(async () => { fireEvent.click(view.getByRole("button", { name: "检查连接与配对状态" })); });
@@ -331,7 +331,7 @@ test("key generation cannot stay pending after timeout or attach its late key to
     let release!: () => void;
     t.mock.method(crypto.subtle, "digest", () => new Promise<ArrayBuffer>(resolve => { release = () => resolve(new ArrayBuffer(32)); }));
     t.mock.timers.enable({ apis: ["setTimeout"] });
-    await act(async () => { fireEvent.click(view.getByRole("button", { name: "生成手机控制密钥" })); });
+    await act(async () => { fireEvent.click(view.getByRole("button", { name: "生成控制密钥" })); });
     await act(async () => {
       if (transition === "timeout") t.mock.timers.tick(8000);
       else fireEvent.change(view.getByRole("combobox"), { target: { value: "fixture-host-b" } });

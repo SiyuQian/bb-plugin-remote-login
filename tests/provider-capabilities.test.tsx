@@ -50,9 +50,9 @@ test("diagnostics require an explicit host and present only that host's method c
   assert.equal(view.getAllByText("环境检查通过").length, 2);
   assert.equal(view.getAllByText("暂不可用").length, 2);
   assert.equal(view.getAllByText("尚未验收").length, 4);
-  assert.match(view.container.textContent!, /开始前还需完成手机配对，并确认预期账号。环境检查不代表已登录。/);
+  assert.match(view.container.textContent!, /开始前还需完成控制配对，并确认预期账号。环境检查不代表已登录。/);
   assert.match(view.container.textContent!, /真实手机控制、账号登录和原任务恢复尚未验收/);
-  assert.match(view.container.textContent!, /macOS arm64.*157\.0\.8103\.50.*25\.16\.0.*Sydney.*oc1/);
+  assert.match(view.container.textContent!, /macOS arm64.*157\.0\.8103\.51.*25\.16\.0.*Sydney.*oc1/);
   assert.match(view.container.textContent!, /设备代码.*不能替代.*Console/);
   assert.match(view.container.textContent!, /插件管理的全新浏览器/);
   assert.equal(view.container.querySelector("pre,textarea,input[type=password],a,img"), null);

@@ -4,7 +4,7 @@ import test from "node:test";
 test("the method registry separates Console readiness from CLI source recognition and never enables unconfigured device grants", async () => {
   const api = await import("../provider-registry.ts").catch(() => null);
   assert.ok(api, "provider/runtime decisions must have an implemented registry");
-  const runtime = { platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: true, cliSourceMatched: false };
+  const runtime = { platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: true, cliSourceMatched: false };
   const report = api.assessLoginCapabilities(runtime);
   assert.deepEqual(report.providers.map(p => p.id), ["oci_cli", "oci_web", "oci_identity_domain_device", "oci_phone_callback"]);
   assert.deepEqual(report.providers[0].reasons, ["cli_source_unmatched"]);
@@ -17,7 +17,7 @@ test("the method registry separates Console readiness from CLI source recognitio
 
 test("runtime readiness requires the exact reviewed host/browser and observable process ownership", async () => {
   const api = await import("../provider-registry.ts").catch(() => null); assert.ok(api);
-  const base = { platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: true, cliSourceMatched: true };
+  const base = { platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: true, cliSourceMatched: true };
   for (const [change, reason] of [
     [{ platform: "linux" }, "platform_unsupported"], [{ architecture: "x64" }, "platform_unsupported"],
     [{ chromeVersion: "158.0.0.0" }, "browser_pin_unmatched"], [{ chromeVersion: null }, "browser_pin_unmatched"],
@@ -32,7 +32,7 @@ test("runtime readiness requires the exact reviewed host/browser and observable 
 test("public reports cannot enable device/callback methods, swap methods or carry unknown fields", async () => {
   const { loginCapabilitiesSchema } = await import("../provider-wire.ts");
   const { assessLoginCapabilities } = await import("../provider-registry.ts");
-  const base = assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: true, cliSourceMatched: true });
+  const base = assessLoginCapabilities({ platform: "darwin", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: true, cliSourceMatched: true });
   for (const edit of [
     (p: typeof base) => { p.providers[2].availability = "candidate"; p.providers[2].reasons = []; },
     (p: typeof base) => { p.providers[0].method = "device_code"; },

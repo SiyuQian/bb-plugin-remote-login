@@ -479,3 +479,49 @@ test("a viewer startup timeout settles its operation even if a private transport
   assert.equal(view.queryByAltText("假页面测试画面"), null);
   assert.equal(closes, 1);
 });
+
+test("host control starts and waits without reading frames or exposing remote input", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  let starts = 0, reads = 0, inputs = 0, handbacks = 0, renewals = 0;
+  const view = renderControls(t, { ...props, controlMode: "host", transport: {
+    async start() { starts++; return { width: 800, height: 600 }; },
+    async frame() { reads++; return { png, width: 800, height: 600, frameRef }; },
+    async input() { inputs++; }, async close() {},
+    async renew() { renewals++; return { capability, expiresAt: Date.now() + 1000 }; },
+    async handback() { handbacks++; return { verified: true }; },
+  } } as FixtureControlsProps);
+  await click(view, "开始假页面测试");
+  await act(async () => { t.mock.timers.tick(3000); });
+  assert.equal(starts, 1); assert.equal(reads, 0); assert.equal(inputs, 0);
+  assert.equal(view.queryByLabelText("测试文字"), null);
+  assert.equal(view.queryByRole("button", { name: "Enter" }), null);
+  assert.equal(view.queryByRole("button", { name: "刷新私有浏览器画面" }), null);
+  assert.ok(view.getByText(/fixture-host/));
+  await click(view, "延长测试控制授权");
+  assert.equal(renewals, 1); assert.equal(reads, 0);
+  await click(view, "交还并核验测试结果");
+  assert.equal(handbacks, 1);
+});
+
+test("pending host startup polls readiness and verification without screenshot reads", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  let ready = false, readiness = 0, reads = 0, handbacks = 0, closes = 0;
+  const view = renderControls(t, { ...props, mode: "oci_web", controlMode: "host", transport: {
+    async start() { return { pending: true }; },
+    async readyStatus() { readiness++; return ready; },
+    async frame() { reads++; return { png, width: 800, height: 600, frameRef }; },
+    async input() {}, async close() { closes++; },
+    async handback() { handbacks++; return { pending: true }; },
+  } } as FixtureControlsProps);
+  await click(view, "开始 OCI Console 登录");
+  await act(async () => { t.mock.timers.tick(1000); });
+  ready = true;
+  await act(async () => { t.mock.timers.tick(1000); });
+  assert.equal(readiness, 2); assert.equal(reads, 0);
+  await click(view, "交还并核验 OCI CLI 登录");
+  await act(async () => { t.mock.timers.tick(1000); });
+  assert.equal(handbacks, 2); assert.equal(reads, 0);
+  view.unmount();
+  await act(async () => {});
+  assert.equal(closes, 0, "protected Console acknowledgement retains the exact browser");
+});

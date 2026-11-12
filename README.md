@@ -1,6 +1,6 @@
 # Remote Login for BB
 
-Independent BB plugin for the mobile-to-host login goal. Current source connects protected synthetic control and separately gated experimental OCI CLI and Console flows to durable coordination and the original native-tool wait/result path. OCI CLI can queue after a matched source inventory; real startup requires owner provisioning, a private verified-and-closed synthetic control receipt and an independently selected private target. After verified handback, the original thread can use an opaque session reference for bounded compartment and Sydney instance reads. Private resource journals support conservative cleanup after a worker exits. Console uses a fresh owned browser, exact user/tenancy/domain verification and a retained browser reference for identity or current title/headings reads. The optional phone callback bridge remains unavailable. Actual iPhone control, OCI/cloud acceptance and production result delivery are unverified.
+Independent BB plugin for protected remote takeover and direct login on the target host. Current source connects protected synthetic control and separately gated experimental OCI CLI and Console flows to durable coordination and the original native-tool wait/result path. OCI CLI can queue after a matched source inventory; real startup requires owner provisioning, a private verified-and-closed synthetic control receipt and an independently selected private target. After verified handback, the original thread can use an opaque session reference for bounded compartment and Sydney instance reads. Private resource journals support conservative cleanup after a worker exits. Console uses a fresh owned browser, exact user/tenancy/domain verification and a retained browser reference for identity or current title/headings reads. The optional phone callback bridge remains unavailable. Actual iPhone control, OCI/cloud acceptance and production result delivery are unverified.
 
 ## Status
 
@@ -9,6 +9,12 @@ This is an **experimental source snapshot**, not a completed real-device or Orac
 See the [architecture diagrams](docs/architecture.md) and [publication scope](PUBLICATION.md).
 
 ## Scope
+
+The controller supports explicit **remote takeover** and **login directly on the
+target host**. Host mode opens a fresh visible plugin-owned browser and disables
+remote screenshots/input. Both retain owner pairing, independent verification,
+handback and cleanup. The choice is explicit; command location does not identify
+the human's device. See [host login and its limits](docs/host-login.md).
 
 Use public SDK 0.6.132 only. Do not modify BB core, installed app files, or builtin plugins. The eventual first release targets plugin-managed host browser sessions; arbitrary system browsers and OS dialogs are not implicitly supported.
 
@@ -40,6 +46,7 @@ The plugin adds a diagnostics page with the same read-only probes. `remote_login
 
 ## Documentation
 
+- [Host desktop login, explicit mode choice and handback boundaries](docs/host-login.md)
 - [Login methods, runtime eligibility and disabled device grant](docs/provider-capabilities.md)
 - [Capabilities and P0 decisions](docs/capabilities.md)
 - [Phone pairing, trusted owner setup and limitations](docs/control-pairing.md)

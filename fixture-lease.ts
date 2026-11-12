@@ -1,3 +1,4 @@
+import { browserControlModeSchema, type BrowserControlMode } from "./browser-control.ts";
 import type { ControlGrant, ControlScope } from "./control-authority.ts";
 import { FixtureBrowserError, type FixtureBrowser } from "./fixture-browser.ts";
 import type { FixtureFrame, FixtureInput } from "./fixture-wire.ts";
@@ -10,12 +11,13 @@ const staleFrame = Symbol();
 type Retention = { dispose(): Promise<void> };
 type Options = {
   authorize(capability: string, scope: ControlScope): Promise<number>;
-  open(signal: AbortSignal): Promise<FixtureBrowser>;
+  open(signal: AbortSignal, controlMode: BrowserControlMode): Promise<FixtureBrowser>;
   lifecycle: AbortSignal;
   now?: () => number;
 };
 type Run = {
   key: string;
+  controlMode: BrowserControlMode;
   capability: string;
   expiresAt: number;
   retained: Retention;
@@ -190,8 +192,11 @@ export class FixtureLease {
     } catch { fail("failed"); }
   }
 
-  async start(capability: string, suppliedScope: ControlScope, signal: AbortSignal, retain: () => Retention): Promise<{ width: 800; height: 600 }> {
+  async start(capability: string, suppliedScope: ControlScope, signal: AbortSignal, retain: () => Retention, suppliedMode: BrowserControlMode = "remote"): Promise<{ width: 800; height: 600 }> {
     const scope = scopeValue(suppliedScope);
+    const mode = browserControlModeSchema.safeParse(suppliedMode);
+    if (!mode.success) fail("unauthorized");
+    const controlMode = mode.data;
     const expiresAt = await this.#authorize(capability, scope, signal);
     if (this.#active || this.#retiring.size) fail("busy");
     const key = scopeKey(scope);
@@ -208,8 +213,8 @@ export class FixtureLease {
     }
     const controller = new AbortController();
     const run: Run = {
-      key, capability, expiresAt, retained, controller,
-      opening: Promise.resolve().then(() => this.#options.open(controller.signal)),
+      key, controlMode, capability, expiresAt, retained, controller,
+      opening: Promise.resolve().then(() => this.#options.open(controller.signal, controlMode)),
       ready: false, proofRevision: 0, busy: false, inputIds: new InputReplayGuard(),
     };
     this.#active = run;
@@ -234,10 +239,11 @@ export class FixtureLease {
   }
 
   async #operate<T>(capability: string, suppliedScope: ControlScope, signal: AbortSignal,
-    uncertainInput: boolean, operation: (browser: FixtureBrowser, run: Run) => Promise<T>): Promise<T> {
+    uncertainInput: boolean, operation: (browser: FixtureBrowser, run: Run) => Promise<T>, remoteOnly = false): Promise<T> {
     const scope = scopeValue(suppliedScope);
     const expiresAt = await this.#authorize(capability, scope, signal);
     const run = this.#owned(scope, expiresAt, capability);
+    if (remoteOnly && run.controlMode !== "remote") fail("inactive");
     if (run.busy) fail("busy");
     run.busy = true;
     const proofRevision = run.proofRevision;
@@ -270,9 +276,13 @@ export class FixtureLease {
     const result = await this.#operate<FixtureFrame | typeof staleFrame>(capability, scope, signal, false, async (browser) => {
       try { return await browser.frame(); }
       catch (error) { if (error instanceof StaleFrameError) return staleFrame; throw error; }
-    });
+    }, true);
     if (result === staleFrame) fail("stale_frame");
     return result;
+  }
+  /** The trusted receipt producer derives the actual mode from this authorized owned run. */
+  controlMode(capability: string, scope: ControlScope, signal: AbortSignal): Promise<BrowserControlMode> {
+    return this.#operate(capability, scope, signal, false, async (_browser, run) => run.controlMode);
   }
   verify(capability: string, scope: ControlScope, signal: AbortSignal): Promise<boolean> {
     return this.#operate(capability, scope, signal, false, (browser) => { browser.invalidateFrame(); return browser.verify(); });
@@ -286,7 +296,7 @@ export class FixtureLease {
         if (error instanceof StaleFrameError) return staleInput;
         throw error;
       }
-    });
+    }, true);
     if (result === staleInput) fail("stale_frame");
   }
   async close(capability: string, suppliedScope: ControlScope, signal: AbortSignal): Promise<void> {

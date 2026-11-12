@@ -4,7 +4,7 @@
 
 | Method | Runtime eligibility | Remaining authorization and acceptance |
 | --- | --- | --- |
-| OCI CLI through host browser | macOS arm64, exact Chrome 157.0.8103.50, working process-ownership inspection, matching fixed CLI 3.88.0/Python 3.14.6 source inventory | Owner root, live scoped proof, recent paired-control receipt, private expected identity, owned child/browser and independent CLI/service verification |
+| OCI CLI through host browser | macOS arm64, exact Chrome 157.0.8103.51, working process-ownership inspection, matching fixed CLI 3.88.0/Python 3.14.6 source inventory | Owner root, live scoped proof, recent paired-control receipt, private expected identity, owned child/browser and independent CLI/service verification |
 | OCI Console through host browser | Same platform/browser/process inspection; CLI source match is not required for Console | Separate private expected user/tenancy/domain/origin, paired control, pinned Console source delivery and current-browser identity verification |
 | Identity Domains device grant | Unavailable: no official application/client is configured in this plugin | Internal protocol client has fixtures only; it is not an OCI CLI security-token or Console-cookie adapter |
 | Phone-local callback forwarding | Unavailable: reviewed OCI callback override/bridge is absent | No callback exposure or forwarding is provided |

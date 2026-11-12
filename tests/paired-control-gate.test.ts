@@ -101,3 +101,39 @@ test("failed acceptance never removes an unrecognized replacement receipt", asyn
   assert.equal(await fs.readFile(path, "utf8"), "unrecognized replacement");
   assert.equal(await s.gate.accepted(), false);
 });
+
+
+test("a host control receipt cannot satisfy the remote path and vice versa", async t => {
+  const s = await system(t), signal = new AbortController().signal;
+  assert.equal(await s.gate.acceptClosedFixture(s.grant.capability, scope, signal, async () => true, "host"), true);
+  assert.equal(await s.gate.accepted("host"), true);
+  assert.equal(await s.gate.accepted(), false);
+  await assert.rejects(s.gate.require("remote"), PairedControlGateError);
+  await s.gate.require("host");
+  assert.equal(await new PairedControlGate(s.dir, s.authority, () => 2001).accepted("host"), true);
+  assert.equal(await s.gate.acceptClosedFixture(s.grant.capability, scope, signal, async () => true), true);
+  assert.equal(await s.gate.accepted("remote"), true);
+  assert.equal(await s.gate.accepted("host"), false);
+});
+
+
+test("a known old browser pin remains unusable until a new authorized fixture closes", async t => {
+  const s = await system(t), signal = new AbortController().signal;
+  await s.gate.acceptClosedFixture(s.grant.capability, scope, signal, async () => true);
+  const path = join(s.dir, "paired-control-acceptance.json"), saved = JSON.parse(await fs.readFile(path, "utf8"));
+  delete saved.controlMode;
+  await fs.writeFile(path, JSON.stringify(saved));
+  assert.equal(await s.gate.accepted(), true, "missing presentation mode is the legacy remote receipt");
+  assert.equal(await s.gate.accepted("host"), false);
+  saved.pin = "private-fixture/Chrome-157.0.8103.50/v1";
+  await fs.writeFile(path, JSON.stringify(saved));
+  assert.equal(await s.gate.accepted("remote"), false);
+  assert.equal(await s.gate.accepted("host"), false);
+  let producerRan = false;
+  assert.equal(await s.gate.acceptClosedFixture(s.grant.capability, scope, signal, async () => { producerRan = true; return false; }, "host"), false);
+  assert.equal(producerRan, true);
+  assert.equal(await s.gate.accepted("host"), false);
+  assert.equal(await s.gate.acceptClosedFixture(s.grant.capability, scope, signal, async () => true, "host"), true);
+  assert.equal(await s.gate.accepted("host"), true);
+  assert.equal(await s.gate.accepted("remote"), false);
+});

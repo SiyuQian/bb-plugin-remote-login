@@ -50,7 +50,7 @@ function fixture(t: TestContext, options: { provisioned?: boolean; rootId?: stri
     },
     experimental_callHostRpc: async (call) => {
       assert.equal(call.hostId, hostId);
-      if (call.method === "inspectLoginCapabilities") return assessLoginCapabilities({ platform: options.compatible || options.consoleRuntime ? "darwin" : "linux", architecture: "arm64", chromeVersion: "157.0.8103.50", processInspection: options.processInspection !== false, cliSourceMatched: options.compatible === true });
+      if (call.method === "inspectLoginCapabilities") return assessLoginCapabilities({ platform: options.compatible || options.consoleRuntime ? "darwin" : "linux", architecture: "arm64", chromeVersion: "157.0.8103.51", processInspection: options.processInspection !== false, cliSourceMatched: options.compatible === true });
       if (call.method === "consoleResumeProof") return options.consoleProof?.() ?? { ok: false, reason: "authorization" };
       if (call.method === "readConsoleTask") return options.consoleRead?.() ?? { ok: false, reason: "authorization" };
       if (call.method === "ociResumeProof") return options.resumeProof?.() ?? { ok: false, reason: "authorization" };

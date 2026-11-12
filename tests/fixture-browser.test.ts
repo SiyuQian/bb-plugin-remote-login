@@ -251,3 +251,37 @@ test("an unexpected extra target invalidates the real private browser", { skip: 
   await driver.close();
   assert.equal((await readdir(root)).length, 0);
 });
+
+
+test("host fixture opens a visible private browser and refuses remote frame and input", { skip: !liveHost, timeout: 20000 }, async t => {
+  recoveryChromeGuard(t);
+  const root = await parentDirectory(t), launch = puppeteer.launch.bind(puppeteer);
+  let owned: Browser | undefined, headless: unknown;
+  t.mock.method(puppeteer, "launch", async (options: Parameters<typeof puppeteer.launch>[0]) => {
+    headless = options?.headless; owned = await launch(options); return owned;
+  });
+  const driver = await Reflect.apply(openFixtureBrowser, undefined, [root, new AbortController().signal, "host"]);
+  try {
+    assert.equal(headless, false, "Explicit host mode must create a visible owned browser.");
+    let claims = 0;
+    await assert.rejects(driver.frame(), FixtureBrowserError);
+    await assert.rejects(driver.input({ type: "text", text: "remote effect" }, "00000000-0000-4000-8000-000000000000", () => { claims++; }), FixtureBrowserError);
+    assert.equal(claims, 0);
+    const page = (await owned!.pages())[0]!;
+    await page.focus("input"); await page.keyboard.type("local fixture");
+    assert.equal(await driver.verify(), false, "A text draft alone cannot complete the local fixture.");
+    await page.click("button");
+    assert.equal(await driver.verify(), true);
+    const before = await page.$eval("input", input => input.value);
+    await page.focus("input"); await page.keyboard.type("after handback");
+    assert.equal(await page.$eval("input", input => input.value), before, "Completed host fixture must keep renderer input fenced until close.");
+  } finally { await driver.close(); }
+});
+
+
+test("unknown fixture presentation modes refuse before browser launch", async t => {
+  const root = await parentDirectory(t); let launches = 0;
+  t.mock.method(puppeteer, "launch", async () => { launches++; throw new Error("unexpected launch"); });
+  await assert.rejects(Reflect.apply(openFixtureBrowser, undefined, [root, new AbortController().signal, "unknown"]), error => expectedError(error));
+  assert.equal(launches, 0); assert.deepEqual(await readdir(root), []);
+});

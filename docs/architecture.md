@@ -1,8 +1,10 @@
 # Remote Login architecture
 
-The phone controls a plugin-owned browser on the selected host. Browser login, the OCI CLI process and its localhost callback remain on that host. The plugin uses only the public BB Plugin SDK and does not change BB core.
+The person explicitly chooses remote takeover or a visible plugin-owned browser on the selected host. Browser login, the OCI CLI process and its localhost callback remain on that host. The plugin uses only the public BB Plugin SDK and does not change BB core.
 
 These diagrams describe the implemented experimental source, exercised with local controlled fixtures. They do not establish real iPhone, Oracle-account or production native-result acceptance. Colours show responsibility, not acceptance status.
+
+The diagrams show the remote control path. In [host mode](host-login.md), direct input to the visible owned window replaces the phone frame/input path. The same private authority, independent verification and original-call continuation remain; the chosen mode is fixed and remote frames/input are refused for that run.
 
 ![Plugin architecture](architecture/overview.svg)
 

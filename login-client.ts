@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { browserControlModeSchema } from "./browser-control.ts";
 import { controlEndpoint } from "./control-client.ts";
 import { controlGrantSchema } from "./control-wire.ts";
 import { boundedJson, receiveResponse } from "./private-response.ts";
@@ -10,6 +11,7 @@ import { consoleExpectedIdentitySchema } from "./oci-console-protocol.ts";
 import { FrameChangedError, StaleFrameError } from "./frame-error.ts";
 
 const target = z.object({ attemptId: z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/) }).strict();
+const controlledTarget = target.extend({ controlMode: browserControlModeSchema.optional() }).strict();
 const key = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const staleResponse = z.object({ error: z.literal("stale_frame") }).strict();
 export type OciLoginStatus = OciHostStatus;
@@ -43,8 +45,9 @@ export async function postLogin<Action extends LoginAction>(
     if (publicAction ? capability !== undefined : !key.safeParse(capability).success) throw new Error();
     const schema = action === "session" ? target.extend({ key }).strict()
       : action === "input" ? target.extend({ event: fixtureInputSchema, frameRef: frameRefSchema }).strict()
-        : action === "oci-target" ? target.extend({ expected: cliExpectedIdentitySchema }).strict()
-          : action === "console-target" ? target.extend({ expected: consoleExpectedIdentitySchema }).strict() : target;
+        : action === "oci-target" ? controlledTarget.extend({ expected: cliExpectedIdentitySchema }).strict()
+          : action === "console-target" ? controlledTarget.extend({ expected: consoleExpectedIdentitySchema }).strict()
+            : action === "start" || action === "oci-status" || action === "console-status" ? controlledTarget : target;
     const parsed = schema.parse(payload);
     const body = JSON.stringify(action === "input" ? { ...parsed, inputId: inputIdSchema.parse(crypto.randomUUID()) } : parsed);
     if (new TextEncoder().encode(body).length > 4096) throw new Error();

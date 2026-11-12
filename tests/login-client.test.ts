@@ -284,3 +284,19 @@ test("job client rejects caller-selected and malformed generated input identitie
   assert.equal(generated, 1);
   assert.equal(requests, 0);
 });
+
+test("host presentation is private typed input only for startup and OCI configuration", async t => {
+  const bodies: unknown[] = [];
+  t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    const action = String(url).split("/").at(-1);
+    return response(action === "start" ? { width: 800, height: 600 } : { configured: false, phoneControlAccepted: false, phase: "unconfigured", failure: null });
+  });
+  for (const action of ["start", "oci-status", "console-status"] as const) {
+    await postLogin("https://bb.invalid", action, { attemptId: "attempt-a", controlMode: "host" }, capability);
+    assert.deepEqual(bodies.at(-1), { attemptId: "attempt-a", controlMode: "host" });
+    await assert.rejects(postLogin("https://bb.invalid", action, { attemptId: "attempt-a", controlMode: "auto" }, capability));
+  }
+  await assert.rejects(postLogin("https://bb.invalid", "handback", { attemptId: "attempt-a", controlMode: "host" }, capability));
+  assert.equal(bodies.length, 3);
+});

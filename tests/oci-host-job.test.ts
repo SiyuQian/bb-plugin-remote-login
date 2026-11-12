@@ -27,7 +27,7 @@ async function eventually(check: () => Promise<boolean>) {
 async function ownedRoots(root: string): Promise<string[]> {
   return (await readdir(root)).filter((name) => name !== "owned-resources-v1");
 }
-async function setup(t: TestContext, options: { phone?: boolean; cleanupFailure?: boolean; unknownArtifact?: boolean; verificationMatch?: boolean; lifetimeMs?: number; diagnosticFailure?: boolean; holdVerification?: boolean; browserCleanupFailure?: boolean; childFailsDuringBrowser?: boolean; sealFailureAt?: number; captureSealFailure?: boolean; holdRead?: boolean; holdSealAt?: number } = {}) {
+async function setup(t: TestContext, options: { holdInputFence?: boolean; refuseInputFence?: boolean; missingInputFence?: boolean; acceptedMode?: "remote" | "host"; phone?: boolean; cleanupFailure?: boolean; unknownArtifact?: boolean; verificationMatch?: boolean; lifetimeMs?: number; diagnosticFailure?: boolean; holdVerification?: boolean; browserCleanupFailure?: boolean; childFailsDuringBrowser?: boolean; sealFailureAt?: number; captureSealFailure?: boolean; holdRead?: boolean; holdSealAt?: number } = {}) {
   const root = await mkdtemp(join(await realpath(tmpdir()), "oci-host-job-")); await chmod(root, 0o700);
   const lifecycle = new AbortController(), childResult = deferred<{ outcome: "bootstrap_complete" | "cancelled" }>();
   const startup = deferred<void>(); let childFinished = false, browserClosed = false, inputs = 0, verifications = 0, retained = 0;
@@ -36,10 +36,12 @@ async function setup(t: TestContext, options: { phone?: boolean; cleanupFailure?
   const sealStarted = deferred<void>(), sealRelease = deferred<void>();
   const browserOpening = deferred<void>(), browserRelease = deferred<void>();
   const seal = Object.freeze({}), chain: string[] = [];
-  let sealChecks = 0;
+  let sealChecks = 0; const gateModes: unknown[] = []; let browserMode: unknown;
+  const inputFence = deferred<void>(); let fenceRequests = 0, childResultReads = 0;
   let capability = "phone-capability", expiresAt = Date.now() + (options.lifetimeMs ?? 60_000), session: OwnedOciSession | undefined;
   const inputState = { frameRef: FRAME_REF as string | undefined, beforeStale: undefined as (() => void) | undefined, error: undefined as unknown };
   const browser = {
+    blockLocalInput: options.missingInputFence ? undefined : async () => { fenceRequests++; if (options.holdInputFence) await inputFence.promise; if (options.refuseInputFence) throw new OciProviderBrowserError(); },
     frame: async () => { inputState.frameRef = FRAME_REF; return { frameRef: FRAME_REF, png: "iVBORw0KGgoAAAAA", width: 800 as const, height: 600 as const }; },
     input: async (_event: unknown, frameRef: string, claimInput?: () => void) => {
       claimInput?.(); if (inputState.error) throw inputState.error;
@@ -52,7 +54,7 @@ async function setup(t: TestContext, options: { phone?: boolean; cleanupFailure?
   const scope: ControlScope = { threadId: "thread-fixture", attemptId: randomUUID(), browserContextId: randomUUID(), generation: 0 };
   const jobs = new OciHostJobs({ dataDir: root, lifecycle: lifecycle.signal,
     authorize: async (cap, supplied) => { if (cap !== capability || JSON.stringify(supplied) !== JSON.stringify(scope)) throw new Error("refused"); return expiresAt; },
-    requirePhoneGate: async () => { if (options.phone === false) throw new Error("unproven phone"); },
+    requirePhoneGate: async (mode) => { gateModes.push(mode); if (options.phone === false || (options.acceptedMode && mode !== options.acceptedMode)) throw new Error("unproven phone"); },
     dependencies: {
       startChild: async (input) => {
         session = input.session; await input.authorize(); await startup.promise;
@@ -65,10 +67,10 @@ async function setup(t: TestContext, options: { phone?: boolean; cleanupFailure?
           await consuming;
         }
         catch { throw new OciChildError("browser_refused"); }
-        return { result: childResult.promise.then((value) => { childFinished = true; return value; }), cancel: async () => { if (options.cleanupFailure) throw new Error("unknown child"); childResult.resolve({ outcome: "cancelled" }); } };
+        return { get result() { childResultReads++; return childResult.promise.then((value) => { childFinished = true; return value; }); }, cancel: async () => { if (options.cleanupFailure) throw new Error("unknown child"); childResult.resolve({ outcome: "cancelled" }); } };
       },
-      openBrowser: async () => {
-        browserOpening.resolve();
+      openBrowser: async (...args) => {
+        browserMode = args[4]; browserOpening.resolve();
         if (options.childFailsDuringBrowser) await browserRelease.promise;
         if (options.browserCleanupFailure) throw new OciProviderBrowserError(true);
         return browser;
@@ -86,7 +88,7 @@ async function setup(t: TestContext, options: { phone?: boolean; cleanupFailure?
     await jobs.dispose().catch(() => {});
     await rm(root, { recursive: true, force: true });
   });
-  return { root, jobs, scope, browser, inputState, startup, childResult, lifecycle, verification, verificationStarted, reading, readStarted, requests, sealStarted, sealRelease, browserOpening, browserRelease, chain, retain: () => { retained++; return { dispose: async () => { retained--; } }; }, rotate: (lifetimeMs?: number) => { capability = "rotated-phone-capability"; expiresAt = lifetimeMs === undefined ? expiresAt + 1000 : Date.now() + lifetimeMs; return { capability, expiresAt }; }, expire: () => { expiresAt = Date.now() - 1; }, get facts() { return { browserClosed, inputs, verifications, retained }; } };
+  return { root, jobs, scope, browser, inputState, startup, childResult, inputFence, lifecycle, verification, verificationStarted, reading, readStarted, requests, sealStarted, sealRelease, browserOpening, browserRelease, chain, retain: () => { retained++; return { dispose: async () => { retained--; } }; }, rotate: (lifetimeMs?: number) => { capability = "rotated-phone-capability"; expiresAt = lifetimeMs === undefined ? expiresAt + 1000 : Date.now() + lifetimeMs; return { capability, expiresAt }; }, expire: () => { expiresAt = Date.now() - 1; }, get facts() { return { browserClosed, inputs, verifications, retained, browserMode, gateModes, fenceRequests, childResultReads }; } };
 }
 
 async function verifiedTask(t: TestContext, options: Parameters<typeof setup>[1] = {}) {
@@ -528,5 +530,62 @@ test("capture change CLI read still closes on post-authorization loss or spoofed
     });
     await assert.rejects(f.jobs.frame("phone-capability", f.scope, signal()), error => error instanceof OciHostJobError && error.code !== "stale_frame");
     await eventually(async () => f.facts.browserClosed); assert.equal(f.facts.inputs, 0);
+  });
+});
+
+
+test("host CLI pins its selected control gate and opener while keeping native verification", async t => {
+  const f = await setup(t, { acceptedMode: "host" }); f.startup.resolve();
+  assert.equal((await f.jobs.status("phone-capability", f.scope, signal(), "host")).phoneControlAccepted, true);
+  assert.equal((await f.jobs.status("phone-capability", f.scope, signal(), "remote")).phoneControlAccepted, false);
+  await f.jobs.configure("phone-capability", f.scope, expected, signal(), "host");
+  await assert.rejects(f.jobs.configure("phone-capability", f.scope, expected, signal(), "remote"), OciHostJobError);
+  await assert.rejects(f.jobs.start("phone-capability", f.scope, signal(), f.retain, "remote"), OciHostJobError);
+  await f.jobs.start("phone-capability", f.scope, signal(), f.retain, "host");
+  await eventually(async () => (await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase === "user_control");
+  assert.equal(f.facts.browserMode, "host");
+  for (const action of ["frame", "input"] as const) {
+    await assert.rejects(action === "frame" ? f.jobs.frame("phone-capability", f.scope, signal())
+      : f.jobs.input("phone-capability", f.scope, { type: "key", key: "Enter" }, signal(), randomUUID(), FRAME_REF), OciHostJobError);
+  }
+  assert.equal(f.facts.inputs, 0); assert.equal(f.facts.browserClosed, false);
+  await f.jobs.handback("phone-capability", f.scope, signal()); f.childResult.resolve({ outcome: "bootstrap_complete" });
+  await eventually(async () => (await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase === "verified");
+  const done = await f.jobs.handback("phone-capability", f.scope, signal());
+  assert.equal(done.verified, true); assert.equal(f.facts.browserClosed, true); assert.equal(f.facts.verifications, 1);
+  await f.jobs.resumeProof(f.scope, done.receipt!);
+  const page = await f.jobs.readTask({ scope: f.scope, receipt: done.receipt!, accountRef: done.accountRef! }, { operation: "list_instances" }, signal());
+  assert.equal(page.result.operation, "list_instances");
+});
+
+
+test("host CLI handback must receive the local input fence ACK before waiting for its child result", async t => {
+  const f = await setup(t, { acceptedMode: "host", holdInputFence: true }); f.startup.resolve();
+  await f.jobs.configure("phone-capability", f.scope, expected, signal(), "host");
+  await f.jobs.start("phone-capability", f.scope, signal(), f.retain, "host");
+  await eventually(async () => (await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase === "user_control");
+  const childResultReads = f.facts.childResultReads;
+  await f.jobs.handback("phone-capability", f.scope, signal());
+  try {
+    await eventually(async () => f.facts.fenceRequests === 1);
+    assert.equal(f.facts.childResultReads, childResultReads, "The handback cannot wait on the CLI child before local input is blocked.");
+    assert.equal(f.facts.browserClosed, false); assert.equal(f.facts.verifications, 0);
+    f.childResult.resolve({ outcome: "bootstrap_complete" });
+    await delay(5); assert.equal(f.facts.verifications, 0); assert.equal(f.facts.browserClosed, false);
+    f.inputFence.resolve();
+    await eventually(async () => (await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase === "verified");
+    assert.equal(f.facts.browserClosed, true); assert.equal(f.facts.verifications, 1);
+  } finally { f.inputFence.resolve(); }
+});
+
+test("host CLI missing or refused local input fence cannot mint verification", async t => {
+  for (const condition of ["missing", "refused"] as const) await t.test(condition, async t => {
+    const f = await setup(t, { acceptedMode: "host", ...(condition === "missing" ? { missingInputFence: true } : { refuseInputFence: true }) }); f.startup.resolve();
+    await f.jobs.configure("phone-capability", f.scope, expected, signal(), "host"); await f.jobs.start("phone-capability", f.scope, signal(), f.retain, "host");
+    await eventually(async () => (await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase === "user_control");
+    await f.jobs.handback("phone-capability", f.scope, signal()); f.childResult.resolve({ outcome: "bootstrap_complete" });
+    await eventually(async () => ["failed", "verified"].includes((await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase));
+    assert.equal((await f.jobs.status("phone-capability", f.scope, signal(), "host")).phase, "failed");
+    assert.equal(f.facts.verifications, 0);
   });
 });

@@ -37,7 +37,7 @@ function fixture(context: ExperimentalHostRpcContext) {
   if (!lease) {
     lease = new FixtureLease({
       authorize: (capability, scope) => control(context).authorize(capability, scope),
-      open: (signal) => openFixtureBrowser(context.experimental_paths.dataDir, signal),
+      open: (signal, controlMode) => openFixtureBrowser(context.experimental_paths.dataDir, signal, controlMode),
       lifecycle: context.lifecycle.signal,
     });
     fixtures.set(context.lifecycle.signal, lease);
@@ -54,7 +54,7 @@ function oci(context: ExperimentalHostRpcContext) {
   let jobs = ociJobs.get(context.lifecycle.signal);
   if (!jobs) {
     jobs = new OciHostJobs({ dataDir: context.experimental_paths.dataDir, lifecycle: context.lifecycle.signal,
-      authorize: (capability, scope) => control(context).authorize(capability, scope), requirePhoneGate: () => pairedGate(context).require(),
+      authorize: (capability, scope) => control(context).authorize(capability, scope), requirePhoneGate: (controlMode) => pairedGate(context).require(controlMode),
     });
     ociJobs.set(context.lifecycle.signal, jobs); ociWorkers.add({ signal: context.lifecycle.signal, jobs });
   }
@@ -64,7 +64,7 @@ function consoleJob(context: ExperimentalHostRpcContext) {
   let jobs = consoleJobs.get(context.lifecycle.signal);
   if (!jobs) {
     jobs = new ConsoleHostJobs({ dataDir: context.experimental_paths.dataDir, lifecycle: context.lifecycle.signal,
-      authorize: (capability, scope) => control(context).authorize(capability, scope), requirePhoneGate: () => pairedGate(context).require(),
+      authorize: (capability, scope) => control(context).authorize(capability, scope), requirePhoneGate: (controlMode) => pairedGate(context).require(controlMode),
     });
     consoleJobs.set(context.lifecycle.signal, jobs); consoleWorkers.add({ signal: context.lifecycle.signal, jobs });
   }
@@ -191,8 +191,8 @@ export default experimental_defineHostEntry({
       });
       return result.ok ? { ok: true as const } : result;
     },
-    startFixture: async ({ capability, scope }, context) => {
-      const result = await checked(context, () => fixture(context).start(capability, scope, context.signal, () => context.experimental_retainWorker()));
+    startFixture: async ({ capability, scope, controlMode }, context) => {
+      const result = await checked(context, () => fixture(context).start(capability, scope, context.signal, () => context.experimental_retainWorker(), controlMode));
       return result.ok ? { ok: true as const, viewport: result.value } : result;
     },
     frameFixture: async ({ capability, scope }, context) => {
@@ -204,23 +204,26 @@ export default experimental_defineHostEntry({
       return result.ok ? { ok: true as const, verified: result.value } : result;
     },
     completePhoneFixture: async ({ capability, scope }, context) => {
-      const result = await checked(context, () => pairedGate(context).acceptClosedFixture(capability, scope, context.signal, async () => {
-        if (!await fixture(context).verify(capability, scope, context.signal)) return false;
-        await fixture(context).close(capability, scope, context.signal);
-        return true;
-      }));
+      const result = await checked(context, async () => {
+        const controlMode = await fixture(context).controlMode(capability, scope, context.signal);
+        return pairedGate(context).acceptClosedFixture(capability, scope, context.signal, async () => {
+          if (!await fixture(context).verify(capability, scope, context.signal)) return false;
+          await fixture(context).close(capability, scope, context.signal);
+          return true;
+        }, controlMode);
+      });
       return result.ok ? { ok: true as const, verified: result.value } : result;
     },
-    ociStatus: async ({ capability, scope }, context) => {
-      const result = await checked(context, () => oci(context).status(capability, scope, context.signal));
+    ociStatus: async ({ capability, scope, controlMode }, context) => {
+      const result = await checked(context, () => oci(context).status(capability, scope, context.signal, controlMode));
       return result.ok ? { ok: true as const, status: result.value } : result;
     },
-    configureOci: async ({ capability, scope, expected }, context) => {
-      const result = await checked(context, () => oci(context).configure(capability, scope, expected, context.signal));
+    configureOci: async ({ capability, scope, expected, controlMode }, context) => {
+      const result = await checked(context, () => oci(context).configure(capability, scope, expected, context.signal, controlMode));
       return result.ok ? { ok: true as const } : result;
     },
-    startOci: async ({ capability, scope }, context) => {
-      const result = await checked(context, () => oci(context).start(capability, scope, context.signal, () => context.experimental_retainWorker()));
+    startOci: async ({ capability, scope, controlMode }, context) => {
+      const result = await checked(context, () => oci(context).start(capability, scope, context.signal, () => context.experimental_retainWorker(), controlMode));
       return result.ok ? { ok: true as const, viewport: result.value } : result;
     },
     frameOci: async ({ capability, scope }, context) => {
@@ -247,16 +250,16 @@ export default experimental_defineHostEntry({
       const result = await checked(context, () => oci(context).readTask(selection, request, context.signal));
       return result.ok ? { ok: true as const, ...result.value } : result;
     },
-    consoleStatus: async ({ capability, scope }, context) => {
-      const result = await checked(context, () => consoleJob(context).status(capability, scope, context.signal));
+    consoleStatus: async ({ capability, scope, controlMode }, context) => {
+      const result = await checked(context, () => consoleJob(context).status(capability, scope, context.signal, controlMode));
       return result.ok ? { ok: true as const, status: result.value } : result;
     },
-    configureConsole: async ({ capability, scope, expected }, context) => {
-      const result = await checked(context, () => consoleJob(context).configure(capability, scope, expected, context.signal));
+    configureConsole: async ({ capability, scope, expected, controlMode }, context) => {
+      const result = await checked(context, () => consoleJob(context).configure(capability, scope, expected, context.signal, controlMode));
       return result.ok ? { ok: true as const } : result;
     },
-    startConsole: async ({ capability, scope }, context) => {
-      const result = await checked(context, () => consoleJob(context).start(capability, scope, context.signal, () => context.experimental_retainWorker()));
+    startConsole: async ({ capability, scope, controlMode }, context) => {
+      const result = await checked(context, () => consoleJob(context).start(capability, scope, context.signal, () => context.experimental_retainWorker(), controlMode));
       return result.ok ? { ok: true as const, viewport: result.value } : result;
     },
     frameConsole: async ({ capability, scope }, context) => {
