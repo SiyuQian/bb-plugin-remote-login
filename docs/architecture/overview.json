@@ -1,0 +1,303 @@
+{
+  "title": "图 1｜Remote Login 插件源码架构",
+  "subtitle": "登录留在 host：手机远控专属浏览器，核验后仅向原等待调用返回受限引用。",
+  "lang": "zh-CN",
+  "columns": [
+    {
+      "label": "用户端与原任务",
+      "width": 270
+    },
+    {
+      "label": "BB 插件服务端",
+      "width": 290
+    },
+    {
+      "label": "所选 host：私有 worker",
+      "width": 320
+    },
+    {
+      "label": "Oracle 外部服务",
+      "width": 270
+    }
+  ],
+  "col_gap": 150,
+  "row_gap": 70,
+  "row_heights": [
+    145,
+    165,
+    170,
+    155
+  ],
+  "kinds": {
+    "phone": {
+      "color": "blue"
+    },
+    "server": {
+      "color": "green"
+    },
+    "host": {
+      "color": "purple"
+    },
+    "store": {
+      "color": "amber"
+    },
+    "actor": {
+      "color": "gray"
+    }
+  },
+  "nodes": [
+    {
+      "id": "agent",
+      "col": 0,
+      "row": 0,
+      "kind": "actor",
+      "title": "原 agent 工具调用",
+      "lines": [
+        "remote_login_request",
+        "绑定原 project / thread",
+        "等待登录卡片的结果"
+      ]
+    },
+    {
+      "id": "coord",
+      "col": 1,
+      "row": 0,
+      "kind": "server",
+      "title": "登录协调器",
+      "lines": [
+        "创建或加入 attempt",
+        "固定 host、代次与期限",
+        "只公开非秘密状态"
+      ]
+    },
+    {
+      "id": "gate",
+      "col": 2,
+      "row": 0,
+      "kind": "host",
+      "title": "接管权限与独占租约",
+      "lines": [
+        "独立 owner 配对",
+        "短期 capability / 当前 root",
+        "受保护模拟控制先验收"
+      ]
+    },
+    {
+      "id": "phone",
+      "col": 0,
+      "row": 1,
+      "kind": "phone",
+      "title": "iPhone 上的 BB App",
+      "lines": [
+        "从原卡片进入接管",
+        "配对密钥只走私有通道",
+        "显示画面、输入与交还"
+      ]
+    },
+    {
+      "id": "gateway",
+      "col": 1,
+      "row": 1,
+      "kind": "server",
+      "title": "私有 HTTP 网关",
+      "lines": [
+        "前后复核权限与目标",
+        "串行输入、轮询与交还",
+        "inputId + frameRef"
+      ]
+    },
+    {
+      "id": "browser",
+      "col": 2,
+      "row": 1,
+      "kind": "host",
+      "title": "专属 Chrome / OCI 作业",
+      "lines": [
+        "新建 profile / context",
+        "CLI 与 Console 分开运行",
+        "截图、输入与私有调试管道"
+      ]
+    },
+    {
+      "id": "oracleLogin",
+      "col": 3,
+      "row": 1,
+      "kind": "actor",
+      "title": "OCI 登录网页",
+      "lines": [
+        "host 浏览器访问 Oracle",
+        "人完成密码 / MFA",
+        "实际账号登录待验收"
+      ],
+      "style": "dashed"
+    },
+    {
+      "id": "original",
+      "col": 0,
+      "row": 2,
+      "kind": "actor",
+      "title": "原等待调用",
+      "lines": [
+        "受限 accountRef / browserRef",
+        "只允许绑定的后续读取",
+        "resume = uncertain"
+      ]
+    },
+    {
+      "id": "resume",
+      "col": 1,
+      "row": 2,
+      "kind": "server",
+      "title": "交还、核验与结果领取",
+      "lines": [
+        "冻结输入后请求独立核验",
+        "末端复核绑定、权限和期限",
+        "仅原调用可领取一次"
+      ]
+    },
+    {
+      "id": "verify",
+      "col": 2,
+      "row": 2,
+      "kind": "host",
+      "title": "独立身份核验器",
+      "lines": [
+        "CLI：诊断 + SDK 签名请求",
+        "Console：同一 context 的 Me",
+        "核对预选身份，不信完成按钮"
+      ]
+    },
+    {
+      "id": "oracleApi",
+      "col": 3,
+      "row": 2,
+      "kind": "actor",
+      "title": "OCI 身份 / 资源 API",
+      "lines": [
+        "实际服务接受请求",
+        "身份匹配 + 有限读取",
+        "真实云端成功待验收"
+      ],
+      "style": "dashed"
+    },
+    {
+      "id": "db",
+      "col": 1,
+      "row": 3,
+      "kind": "store",
+      "title": "SQLite 与清理 outbox",
+      "lines": [
+        "attempt、代次、期限",
+        "非秘密核验 / 领取状态",
+        "取消、超时与清理任务"
+      ]
+    },
+    {
+      "id": "hostState",
+      "col": 2,
+      "row": 3,
+      "kind": "store",
+      "title": "host 私有状态",
+      "lines": [
+        "root 校验值 / 配对 receipt",
+        "私有凭据与资源归属日志",
+        "活动 lease 与引用由 worker 持有"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "agent",
+      "to": "coord",
+      "label": "发起登录"
+    },
+    {
+      "from": "coord",
+      "to": "gate",
+      "label": "显式 hostId"
+    },
+    {
+      "from": "coord",
+      "to": "gateway",
+      "label": "共享状态"
+    },
+    {
+      "from": "gate",
+      "to": "browser",
+      "label": "通过后启动"
+    },
+    {
+      "from": "phone",
+      "to": "gateway",
+      "label": "画面 / 操作",
+      "both": true
+    },
+    {
+      "from": "gateway",
+      "to": "browser",
+      "label": "私有 host RPC",
+      "both": true
+    },
+    {
+      "from": "browser",
+      "to": "oracleLogin",
+      "label": "HTTPS",
+      "both": true
+    },
+    {
+      "from": "gateway",
+      "to": "resume",
+      "label": "交还 / 轮询"
+    },
+    {
+      "from": "browser",
+      "to": "verify",
+      "label": "冻结输入"
+    },
+    {
+      "from": "verify",
+      "to": "resume",
+      "label": "核验与复核",
+      "both": true
+    },
+    {
+      "from": "verify",
+      "to": "oracleApi",
+      "label": "签名请求",
+      "both": true
+    },
+    {
+      "from": "resume",
+      "to": "original",
+      "label": "受限引用"
+    },
+    {
+      "from": "resume",
+      "to": "db",
+      "label": "状态 / 清理"
+    },
+    {
+      "from": "verify",
+      "to": "hostState",
+      "label": "受控保留 / 清理"
+    }
+  ],
+  "legend": [
+    {
+      "kind": "phone",
+      "label": "手机控制界面"
+    },
+    {
+      "kind": "server",
+      "label": "BB 插件服务逻辑"
+    },
+    {
+      "kind": "host",
+      "label": "host 私有执行"
+    },
+    {
+      "kind": "store",
+      "label": "存储：按列隔离"
+    }
+  ]
+}

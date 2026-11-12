@@ -1,0 +1,190 @@
+{
+  "title": "图 2｜CLI 与 Console 是两条独立链路",
+  "subtitle": "两个分支各用自己的会话与核验；交还后仍需原调用复核，不能据按钮或回调宣告成功。",
+  "lang": "zh-CN",
+  "columns": [
+    {
+      "label": "host：执行登录",
+      "width": 310
+    },
+    {
+      "label": "host：私有会话",
+      "width": 300
+    },
+    {
+      "label": "host：独立核验",
+      "width": 330
+    },
+    {
+      "label": "原任务：插件只读工具",
+      "width": 320
+    }
+  ],
+  "col_gap": 150,
+  "row_gap": 80,
+  "row_heights": [
+    210,
+    210
+  ],
+  "kinds": {
+    "phone": {
+      "color": "blue"
+    },
+    "server": {
+      "color": "green"
+    },
+    "host": {
+      "color": "purple"
+    },
+    "store": {
+      "color": "amber"
+    },
+    "actor": {
+      "color": "gray"
+    }
+  },
+  "nodes": [
+    {
+      "id": "cli",
+      "col": 0,
+      "row": 0,
+      "kind": "host",
+      "title": "OCI CLI 分支",
+      "lines": [
+        "官方 CLI 子进程 + 专属 Chrome",
+        "网页与 8181 监听都在 host",
+        "浏览器回调 host 本地 CLI"
+      ]
+    },
+    {
+      "id": "cliState",
+      "col": 1,
+      "row": 0,
+      "kind": "store",
+      "title": "CLI 私有会话文件",
+      "lines": [
+        "受保护 token / key",
+        "完成后封存同一凭据代次",
+        "不借用 Console 会话"
+      ]
+    },
+    {
+      "id": "cliVerify",
+      "col": 2,
+      "row": 0,
+      "kind": "host",
+      "title": "CLI 身份核验",
+      "lines": [
+        "官方 session validate",
+        "同一快照发 SDK 签名请求",
+        "精确核对预选 user / tenancy"
+      ]
+    },
+    {
+      "id": "cliRead",
+      "col": 3,
+      "row": 0,
+      "kind": "server",
+      "title": "受限 CLI 读取",
+      "lines": [
+        "accountRef 绑定原线程",
+        "compartment / Sydney 实例",
+        "固定请求、最多 25 行"
+      ]
+    },
+    {
+      "id": "console",
+      "col": 0,
+      "row": 1,
+      "kind": "host",
+      "title": "OCI Console 分支",
+      "lines": [
+        "独立 Chrome profile / context",
+        "手机只控制这次登录页面",
+        "交还时冻结输入与网络"
+      ]
+    },
+    {
+      "id": "webState",
+      "col": 1,
+      "row": 1,
+      "kind": "store",
+      "title": "保留同一浏览器 context",
+      "lines": [
+        "网页凭据留在私有会话",
+        "不导出 cookie / key",
+        "与 CLI token 分开管理"
+      ]
+    },
+    {
+      "id": "webVerify",
+      "col": 2,
+      "row": 1,
+      "kind": "host",
+      "title": "Console 身份核验",
+      "lines": [
+        "固定 Console 脚本指纹",
+        "同一 context 的签名 Me 请求",
+        "核对 user / tenancy / domain"
+      ]
+    },
+    {
+      "id": "webRead",
+      "col": 3,
+      "row": 1,
+      "kind": "server",
+      "title": "受限 Console 读取",
+      "lines": [
+        "browserRef 绑定原线程",
+        "重验身份后读当前标题 / headings",
+        "无任意导航、脚本或表单操作"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "cli",
+      "to": "cliState",
+      "label": "完成后封存"
+    },
+    {
+      "from": "cliState",
+      "to": "cliVerify",
+      "label": "同一快照"
+    },
+    {
+      "from": "cliVerify",
+      "to": "cliRead",
+      "label": "原调用复核后"
+    },
+    {
+      "from": "console",
+      "to": "webState",
+      "label": "保留本会话"
+    },
+    {
+      "from": "webState",
+      "to": "webVerify",
+      "label": "同一 context"
+    },
+    {
+      "from": "webVerify",
+      "to": "webRead",
+      "label": "原调用复核后"
+    }
+  ],
+  "legend": [
+    {
+      "kind": "host",
+      "label": "host 私有执行"
+    },
+    {
+      "kind": "store",
+      "label": "各自的私有会话"
+    },
+    {
+      "kind": "server",
+      "label": "插件受限后续工具"
+    }
+  ]
+}

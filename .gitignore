@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Local credentials and private host state
+.env
+.env.*
+*.pem
+*.key
+*.db
+*.sqlite
+control-root.json
+control-budget.json
+paired-control-acceptance.json
+host-data/

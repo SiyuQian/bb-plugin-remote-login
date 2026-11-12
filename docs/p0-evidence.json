@@ -1,0 +1,56 @@
+{
+  "scope": "P0 diagnostics only; no sensitive takeover",
+  "source_path": "redacted-local-development-path",
+  "branch": "feat/remote-login",
+  "sdk": "0.6.132",
+  "host_id": "redacted-enrolled-host",
+  "checks": {
+    "baseline_typecheck": "pass before scaffold replacement",
+    "tests": {
+      "pass": 11,
+      "fail": 0,
+      "kind": "public SDK fake-host and host-entry harness"
+    },
+    "typecheck": "exit 0",
+    "plugin_types_check": "exit 0",
+    "build": "exit 0: app/server/host artifacts",
+    "public_sdk_scan": {
+      "violations": 0,
+      "privateDependencies": 0
+    },
+    "install": "running from persistent path source",
+    "live_host_probe": {
+      "platform": "darwin",
+      "architecture": "arm64",
+      "nodeVersion": "v24.22.2",
+      "browser": {
+        "available": true,
+        "name": "Google Chrome"
+      }
+    },
+    "live_cli_rpc_caller": {
+      "kind": "client",
+      "humanVerified": false
+    },
+    "missing_host_cli": "exit 1, no worker invoked",
+    "configuration_regression_mutation": "forcing unconditional fixture-tool exposure failed the new configuration test; source restored and all tests passed"
+  },
+  "not_verified": [
+    "human-only input authorization",
+    "private browser takeover",
+    "production wait/result delivery",
+    "actual phone UI",
+    "OCI CLI and console login"
+  ],
+  "decision": "SDK identity alone does not pass the human-control gate; investigate independently trusted phone pairing without changing BB core.",
+  "independent_review": {
+    "critical": 0,
+    "important": 0,
+    "minor": "full rejected/cancelled non-secret result assertions added"
+  },
+  "target_clients": {
+    "host_and_browser": "verified daemon runtime on darwin/arm64 with Chrome executable",
+    "mobile": "BB mobile app or mobile web; exact first validation client awaiting user preference; no actual phone test claimed"
+  },
+  "identifying_fields_redacted_for_publication": true
+}

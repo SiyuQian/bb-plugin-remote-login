@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1822" height="867" viewBox="0 0 1822 867" xml:lang="zh-CN" font-family="system-ui, -apple-system, &#x27;Segoe UI&#x27;, &#x27;Helvetica Neue&#x27;, Arial, &#x27;Noto Sans&#x27;, &#x27;PingFang SC&#x27;, &#x27;Hiragino Sans&#x27;, &#x27;Apple SD Gothic Neo&#x27;, &#x27;Microsoft YaHei&#x27;, &#x27;Yu Gothic&#x27;, &#x27;Malgun Gothic&#x27;, &#x27;Noto Sans CJK SC&#x27;, &#x27;Noto Sans CJK JP&#x27;, &#x27;Noto Sans CJK KR&#x27;, &#x27;Noto Sans Arabic&#x27;, &#x27;Noto Sans Devanagari&#x27;, &#x27;Noto Sans Thai&#x27;, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L12,6 L0,12 z" fill="#4B5563"/></marker><marker id="arrow-big" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="22" markerHeight="22" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,1 L12,6 L0,11 z" fill="#4B5563"/></marker></defs>
+<rect width="1822" height="867" fill="#FFFFFF"/>
+<text x="56" y="90" font-size="34" font-weight="700" fill="#111827">图 2｜CLI 与 Console 是两条独立链路</text>
+<text x="56" y="125" font-size="19" fill="#4B5563">两个分支各用自己的会话与核验；交还后仍需原调用复核，不能据按钮或回调宣告成功。</text>
+<text x="211.0" y="181" text-anchor="middle" font-size="16" font-weight="600" letter-spacing="2" fill="#9CA3AF">host：执行登录</text>
+<text x="666.0" y="181" text-anchor="middle" font-size="16" font-weight="600" letter-spacing="2" fill="#9CA3AF">host：私有会话</text>
+<text x="1131.0" y="181" text-anchor="middle" font-size="16" font-weight="600" letter-spacing="2" fill="#9CA3AF">host：独立核验</text>
+<text x="1606.0" y="181" text-anchor="middle" font-size="16" font-weight="600" letter-spacing="2" fill="#9CA3AF">原任务：插件只读工具</text>
+<line x1="370.0" y1="320.0" x2="512.0" y2="320.0" stroke="#4B5563" stroke-width="2.5" marker-end="url(#arrow-big)"/>
+<rect x="400.0" y="298.0" width="82.0" height="20" rx="4" fill="#FFFFFF"/>
+<text x="441.0" y="313.0" text-anchor="middle" font-size="14" fill="#4B5563">完成后封存</text>
+<line x1="820.0" y1="320.0" x2="962.0" y2="320.0" stroke="#4B5563" stroke-width="2.5" marker-end="url(#arrow-big)"/>
+<rect x="857.0" y="298.0" width="68.0" height="20" rx="4" fill="#FFFFFF"/>
+<text x="891.0" y="313.0" text-anchor="middle" font-size="14" fill="#4B5563">同一快照</text>
+<line x1="1300.0" y1="320.0" x2="1442.0" y2="320.0" stroke="#4B5563" stroke-width="2.5" marker-end="url(#arrow-big)"/>
+<rect x="1323.0" y="298.0" width="96.0" height="20" rx="4" fill="#FFFFFF"/>
+<text x="1371.0" y="313.0" text-anchor="middle" font-size="14" fill="#4B5563">原调用复核后</text>
+<line x1="370.0" y1="610.0" x2="512.0" y2="610.0" stroke="#4B5563" stroke-width="2.5" marker-end="url(#arrow-big)"/>
+<rect x="400.0" y="588.0" width="82.0" height="20" rx="4" fill="#FFFFFF"/>
+<text x="441.0" y="603.0" text-anchor="middle" font-size="14" fill="#4B5563">保留本会话</text>
+<line x1="820.0" y1="610.0" x2="962.0" y2="610.0" stroke="#4B5563" stroke-width="2.5" marker-end="url(#arrow-big)"/>
+<rect x="841.5" y="588.0" width="99.1" height="20" rx="4" fill="#FFFFFF"/>
+<text x="891.0" y="603.0" text-anchor="middle" font-size="14" fill="#4B5563">同一 context</text>
+<line x1="1300.0" y1="610.0" x2="1442.0" y2="610.0" stroke="#4B5563" stroke-width="2.5" marker-end="url(#arrow-big)"/>
+<rect x="1323.0" y="588.0" width="96.0" height="20" rx="4" fill="#FFFFFF"/>
+<text x="1371.0" y="603.0" text-anchor="middle" font-size="14" fill="#4B5563">原调用复核后</text>
+<rect x="56" y="215" width="310" height="210" rx="12" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2.5"/>
+<text x="211.0" y="288.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">OCI CLI 分支</text>
+<text x="211.0" y="315.0" text-anchor="middle" font-size="16" fill="#111827">官方 CLI 子进程 + 专属 Chrome</text>
+<text x="211.0" y="341.0" text-anchor="middle" font-size="16" fill="#111827">网页与 8181 监听都在 host</text>
+<text x="211.0" y="367.0" text-anchor="middle" font-size="16" fill="#111827">浏览器回调 host 本地 CLI</text>
+<rect x="516" y="215" width="300" height="210" rx="12" fill="#FEF3C7" stroke="#D97706" stroke-width="2.5"/>
+<text x="666.0" y="288.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">CLI 私有会话文件</text>
+<text x="666.0" y="315.0" text-anchor="middle" font-size="16" fill="#111827">受保护 token / key</text>
+<text x="666.0" y="341.0" text-anchor="middle" font-size="16" fill="#111827">完成后封存同一凭据代次</text>
+<text x="666.0" y="367.0" text-anchor="middle" font-size="16" fill="#111827">不借用 Console 会话</text>
+<rect x="966" y="215" width="330" height="210" rx="12" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2.5"/>
+<text x="1131.0" y="288.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">CLI 身份核验</text>
+<text x="1131.0" y="315.0" text-anchor="middle" font-size="16" fill="#111827">官方 session validate</text>
+<text x="1131.0" y="341.0" text-anchor="middle" font-size="16" fill="#111827">同一快照发 SDK 签名请求</text>
+<text x="1131.0" y="367.0" text-anchor="middle" font-size="16" fill="#111827">精确核对预选 user / tenancy</text>
+<rect x="1446" y="215" width="320" height="210" rx="12" fill="#DCFCE7" stroke="#16A34A" stroke-width="2.5"/>
+<text x="1606.0" y="288.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">受限 CLI 读取</text>
+<text x="1606.0" y="315.0" text-anchor="middle" font-size="16" fill="#111827">accountRef 绑定原线程</text>
+<text x="1606.0" y="341.0" text-anchor="middle" font-size="16" fill="#111827">compartment / Sydney 实例</text>
+<text x="1606.0" y="367.0" text-anchor="middle" font-size="16" fill="#111827">固定请求、最多 25 行</text>
+<rect x="56" y="505" width="310" height="210" rx="12" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2.5"/>
+<text x="211.0" y="578.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">OCI Console 分支</text>
+<text x="211.0" y="605.0" text-anchor="middle" font-size="16" fill="#111827">独立 Chrome profile / context</text>
+<text x="211.0" y="631.0" text-anchor="middle" font-size="16" fill="#111827">手机只控制这次登录页面</text>
+<text x="211.0" y="657.0" text-anchor="middle" font-size="16" fill="#111827">交还时冻结输入与网络</text>
+<rect x="516" y="505" width="300" height="210" rx="12" fill="#FEF3C7" stroke="#D97706" stroke-width="2.5"/>
+<text x="666.0" y="578.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">保留同一浏览器 context</text>
+<text x="666.0" y="605.0" text-anchor="middle" font-size="16" fill="#111827">网页凭据留在私有会话</text>
+<text x="666.0" y="631.0" text-anchor="middle" font-size="16" fill="#111827">不导出 cookie / key</text>
+<text x="666.0" y="657.0" text-anchor="middle" font-size="16" fill="#111827">与 CLI token 分开管理</text>
+<rect x="966" y="505" width="330" height="210" rx="12" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2.5"/>
+<text x="1131.0" y="578.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">Console 身份核验</text>
+<text x="1131.0" y="605.0" text-anchor="middle" font-size="16" fill="#111827">固定 Console 脚本指纹</text>
+<text x="1131.0" y="631.0" text-anchor="middle" font-size="16" fill="#111827">同一 context 的签名 Me 请求</text>
+<text x="1131.0" y="657.0" text-anchor="middle" font-size="16" fill="#111827">核对 user / tenancy / domain</text>
+<rect x="1446" y="505" width="320" height="210" rx="12" fill="#DCFCE7" stroke="#16A34A" stroke-width="2.5"/>
+<text x="1606.0" y="578.0" text-anchor="middle" font-size="20" font-weight="700" fill="#111827">受限 Console 读取</text>
+<text x="1606.0" y="605.0" text-anchor="middle" font-size="16" fill="#111827">browserRef 绑定原线程</text>
+<text x="1606.0" y="631.0" text-anchor="middle" font-size="16" fill="#111827">重验身份后读当前标题 / headings</text>
+<text x="1606.0" y="657.0" text-anchor="middle" font-size="16" fill="#111827">无任意导航、脚本或表单操作</text>
+<rect x="56.0" y="771" width="26" height="26" rx="6" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2"/>
+<text x="94.0" y="790" font-size="17" fill="#4B5563">host 私有执行</text>
+<rect x="626.0" y="771" width="26" height="26" rx="6" fill="#FEF3C7" stroke="#D97706" stroke-width="2"/>
+<text x="664.0" y="790" font-size="17" fill="#4B5563">各自的私有会话</text>
+<rect x="1196.0" y="771" width="26" height="26" rx="6" fill="#DCFCE7" stroke="#16A34A" stroke-width="2"/>
+<text x="1234.0" y="790" font-size="17" fill="#4B5563">插件受限后续工具</text>
+</svg>
